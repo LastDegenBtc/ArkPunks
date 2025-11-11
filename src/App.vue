@@ -3,7 +3,8 @@
     <header class="app-header">
       <div class="container">
         <h1 class="logo">
-          <span class="logo-icon">🎨</span>
+          <img v-if="logoPunkImage" :src="logoPunkImage" alt="ArkPunks" class="logo-icon logo-punk" />
+          <span v-else class="logo-icon">🎨</span>
           ArkPunks
         </h1>
         <nav class="nav">
@@ -15,6 +16,9 @@
           </button>
           <button @click="currentView = 'marketplace'" :class="{ active: currentView === 'marketplace' }">
             Marketplace
+          </button>
+          <button @click="currentView = 'faq'" :class="{ active: currentView === 'faq' }">
+            FAQ
           </button>
         </nav>
       </div>
@@ -80,17 +84,17 @@
         <div v-if="currentView === 'marketplace'" class="view">
           <Marketplace />
         </div>
+
+        <div v-if="currentView === 'faq'" class="view">
+          <FAQ />
+        </div>
       </div>
     </main>
 
     <footer class="app-footer">
       <div class="container">
-        <p class="warning-arkade">
-          🔒 ArkPunks are off-chain native assets. Exiting to on-chain Bitcoin will destroy your punks!<br/>
-          Keep your funds in Arkade to preserve your collection and trade on the marketplace.
-        </p>
         <p>
-          Built with ❤️ on Bitcoin using
+          Built with ❤️ by <strong>PPRGB20</strong> on Bitcoin using
           <a href="https://docs.arkadeos.com" target="_blank">Arkade Protocol</a>
         </p>
         <p class="disclaimer">
@@ -107,6 +111,7 @@ import PunkCard from './components/PunkCard.vue'
 import MintPunk from './components/MintPunk.vue'
 import Marketplace from './components/Marketplace.vue'
 import WalletConnect from './components/WalletConnect.vue'
+import FAQ from './components/FAQ.vue'
 import { PunkState } from './types/punk'
 import { generatePunkMetadata } from './utils/generator'
 import type { ArkadeWalletInterface } from './utils/arkadeWallet'
@@ -118,7 +123,7 @@ import { getPublicKey, nip19 } from 'nostr-tools'
 
 const walletConnectRef = ref<any>()
 
-const currentView = ref<'gallery' | 'mint' | 'marketplace'>('gallery')
+const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'faq'>('gallery')
 const selectedPunk = ref<PunkState | null>(null)
 
 // Track which punks are currently listed
@@ -168,6 +173,26 @@ const samplePunks = computed(() => {
 // Official punks list from Nostr authority relay
 const officialPunkIds = ref<string[]>([])
 const officialPunksMap = ref<Map<string, number>>(new Map())
+
+// Logo punk image - looking for punk #10c01753...
+const logoPunkImage = computed(() => {
+  // Find punk that starts with 10c01753
+  const logoPunk = allPunks.value.find(p => p.punkId.startsWith('10c01753'))
+  if (!logoPunk?.metadata) return null
+
+  // Generate image without background for logo
+  const imageUrl = logoPunk.metadata.imageUrl
+  if (!imageUrl) return null
+
+  // Replace the background in the SVG with transparent
+  const svgData = atob(imageUrl.split(',')[1])
+  const transparentSvg = svgData.replace(
+    /<rect width="24" height="24" fill="[^"]*" \/>/,
+    '<rect width="24" height="24" fill="transparent" />'
+  )
+
+  return `data:image/svg+xml;base64,${btoa(transparentSvg)}`
+})
 
 // Load all punks from localStorage (with sold punk filtering for normal loads)
 async function loadPunks() {
@@ -241,6 +266,17 @@ function updateWalletAddress() {
 // Watch for wallet changes
 watch(() => walletConnectRef.value?.getWallet?.()?.address, () => {
   updateWalletAddress()
+})
+
+// Update favicon when logo punk is loaded
+watch(logoPunkImage, (newImage) => {
+  if (newImage) {
+    const link = document.querySelector("link[rel*='icon']") as HTMLLinkElement || document.createElement('link')
+    link.type = 'image/png'
+    link.rel = 'icon'
+    link.href = newImage
+    document.head.appendChild(link)
+  }
 })
 
 // Load official punks list from Nostr
@@ -733,6 +769,15 @@ body {
   font-size: 32px;
   filter: none;
   -webkit-text-fill-color: initial;
+}
+
+.logo-punk {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  border-radius: 4px;
 }
 
 .badge-testnet {
