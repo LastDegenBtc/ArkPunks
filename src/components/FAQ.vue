@@ -65,13 +65,13 @@
 
         <div class="faq-item">
           <button class="faq-question" @click="toggle('what-official')">
-            <span>What makes a punk "OFFICIAL"?</span>
+            <span>What does the green check ✓ mean?</span>
             <span class="faq-icon">{{ isOpen('what-official') ? '−' : '+' }}</span>
           </button>
           <div v-if="isOpen('what-official')" class="faq-answer">
-            <p>Official ArkPunks are the first 1,000 punks published to the relay.damus.io Nostr relay by the project creator (PPRGB20).</p>
-            <p>These punks have a "✓ OFFICIAL" badge and are numbered #0 to #999. Official punks are considered the "genesis collection" and may have special significance for collectors.</p>
-            <p>All punks after #999 are still valid ArkPunks, but won't have the official badge.</p>
+            <p>The green check mark ✓ indicates <strong>Official ArkPunks</strong> - the first 1,000 punks published to the relay.damus.io Nostr relay by the project creator (PPRGB20).</p>
+            <p>These verified punks are numbered #0 to #999 (you can see the number next to their type) and are considered the "genesis collection". They may have special significance for collectors.</p>
+            <p>All punks after #999 are still valid ArkPunks with the same functionality, but won't have the verification badge.</p>
           </div>
         </div>
 

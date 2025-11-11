@@ -2,8 +2,8 @@
   <div class="punk-card" @click="$emit('click', punk)">
     <div class="punk-image">
       <img :src="punk.metadata.imageUrl" :alt="punk.metadata.name" />
-      <div v-if="isOfficial" class="official-badge" title="Official ArkPunk - First 1000 on relay.damus.io">
-        ✓ OFFICIAL
+      <div v-if="isOfficial" class="official-badge" title="Official ArkPunk - Verified on relay.damus.io">
+        ✓
       </div>
     </div>
 
@@ -107,13 +107,18 @@ function formatSats(sats: bigint): string {
   right: 8px;
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: #fff;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 50%;
+  font-size: 12px;
   font-weight: bold;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: help;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .punk-info h3 {
