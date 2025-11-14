@@ -216,6 +216,112 @@ export async function getPunksByOwner(owner: string): Promise<NostrEvent[]> {
 }
 
 /**
+ * Get mint count for a specific pubkey within a time window
+ * @param pubkey - Nostr public key (hex)
+ * @param timeWindowSeconds - Time window in seconds (default: 24 hours)
+ * @returns Number of mints in the time window
+ */
+export async function getMintCountByPubkey(
+  pubkey: string,
+  timeWindowSeconds: number = PUNK_SUPPLY_CONFIG.MINT_TIME_WINDOW
+): Promise<number> {
+  try {
+    const now = Math.floor(Date.now() / 1000)
+    const since = now - timeWindowSeconds
+
+    console.log(`📊 Checking mint count for pubkey: ${pubkey.slice(0, 16)}...`)
+    console.log(`   Time window: ${timeWindowSeconds}s (${timeWindowSeconds / 3600}h)`)
+
+    const events = await pool.querySync(RELAYS, {
+      kinds: [KIND_PUNK_MINT],
+      authors: [pubkey],
+      since: since,
+      limit: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS + 10 // Fetch a bit more to be safe
+    })
+
+    console.log(`   Found ${events.length} mints in the last ${timeWindowSeconds / 3600}h`)
+
+    return events.length
+  } catch (error) {
+    console.error('Failed to get mint count by pubkey:', error)
+    // On error, return 0 to allow minting (fail open)
+    return 0
+  }
+}
+
+/**
+ * Check if a user can mint based on their pubkey and rate limits
+ * @param pubkey - Nostr public key (hex)
+ * @returns Object with canMint flag and remaining mints count
+ */
+export async function canUserMint(pubkey: string): Promise<{
+  canMint: boolean
+  mintsUsed: number
+  mintsRemaining: number
+  maxMints: number
+  timeWindow: string
+  nextResetTime?: Date
+}> {
+  try {
+    const mintsUsed = await getMintCountByPubkey(pubkey)
+    const maxMints = PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS
+    const mintsRemaining = Math.max(0, maxMints - mintsUsed)
+    const canMint = mintsRemaining > 0
+
+    // Calculate next reset time (oldest mint + time window)
+    let nextResetTime: Date | undefined
+
+    if (!canMint) {
+      // Fetch the oldest mint to calculate when the limit resets
+      const now = Math.floor(Date.now() / 1000)
+      const since = now - PUNK_SUPPLY_CONFIG.MINT_TIME_WINDOW
+
+      const events = await pool.querySync(RELAYS, {
+        kinds: [KIND_PUNK_MINT],
+        authors: [pubkey],
+        since: since,
+        limit: maxMints + 1
+      })
+
+      if (events.length > 0) {
+        // Sort by timestamp (oldest first)
+        events.sort((a, b) => a.created_at - b.created_at)
+        const oldestMint = events[0]
+        const resetTimestamp = (oldestMint.created_at + PUNK_SUPPLY_CONFIG.MINT_TIME_WINDOW) * 1000
+        nextResetTime = new Date(resetTimestamp)
+      }
+    }
+
+    console.log(`✅ Mint check for pubkey ${pubkey.slice(0, 16)}:`)
+    console.log(`   Can mint: ${canMint}`)
+    console.log(`   Mints used: ${mintsUsed} / ${maxMints}`)
+    console.log(`   Mints remaining: ${mintsRemaining}`)
+    if (nextResetTime) {
+      console.log(`   Next reset: ${nextResetTime.toLocaleString()}`)
+    }
+
+    return {
+      canMint,
+      mintsUsed,
+      mintsRemaining,
+      maxMints,
+      timeWindow: `${PUNK_SUPPLY_CONFIG.MINT_TIME_WINDOW / 3600}h`,
+      nextResetTime
+    }
+  } catch (error) {
+    console.error('Failed to check if user can mint:', error)
+    // On error, allow minting (fail open)
+    return {
+      canMint: true,
+      mintsUsed: 0,
+      mintsRemaining: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+      maxMints: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+      timeWindow: `${PUNK_SUPPLY_CONFIG.MINT_TIME_WINDOW / 3600}h`
+    }
+  }
+}
+
+/**
  * Publish L1 exit event to Nostr
  * Links a punk to a Bitcoin L1 address before exiting Arkade
  * This ensures the punk can be recovered even after converting VTXO → UTXO

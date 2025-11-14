@@ -45,6 +45,8 @@ export const PUNK_SUPPLY_CONFIG = {
   MAX_TOTAL_PUNKS: 1000, // Total collection size (change to 10000 if successful!)
   LAUNCH_DATE: '2025-11-20T11:00:00.000Z', // 20 Nov 2025, 12:00 CET (11:00 UTC)
   MINT_ENABLED: false, // Set to true on launch day to enable minting
+  MAX_MINTS_PER_ADDRESS: 5, // Maximum mints per address per day
+  MINT_TIME_WINDOW: 24 * 60 * 60, // Time window in seconds (24 hours)
 }
 
 /**

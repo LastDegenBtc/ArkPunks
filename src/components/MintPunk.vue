@@ -48,6 +48,43 @@
       </div>
     </div>
 
+    <!-- User Mint Limit Counter (shown after launch) -->
+    <div v-if="isLaunched" class="user-mint-limit">
+      <div v-if="checkingLimit" class="checking-limit">
+        <span class="spinner-small"></span>
+        <span>Checking your mint limit...</span>
+      </div>
+      <div v-else class="limit-info">
+        <div class="limit-header">
+          <span class="limit-icon">⏱️</span>
+          <span class="limit-title">Your Daily Mint Allowance</span>
+        </div>
+        <div class="limit-progress">
+          <div class="limit-bar">
+            <div
+              class="limit-fill"
+              :style="{ width: (userMintLimit.mintsUsed / userMintLimit.maxMints * 100) + '%' }"
+              :class="{ 'limit-full': !userMintLimit.canMint }"
+            ></div>
+          </div>
+          <div class="limit-stats">
+            <span class="mints-remaining" :class="{ 'limit-reached': !userMintLimit.canMint }">
+              {{ userMintLimit.mintsRemaining }} mints remaining
+            </span>
+            <span class="mints-used">
+              ({{ userMintLimit.mintsUsed }} / {{ userMintLimit.maxMints }} used)
+            </span>
+          </div>
+        </div>
+        <div v-if="!userMintLimit.canMint && userMintLimit.nextResetTime" class="limit-reset">
+          Resets at: {{ userMintLimit.nextResetTime.toLocaleString() }}
+        </div>
+        <div v-else class="limit-note">
+          Limit resets every {{ userMintLimit.timeWindow }}
+        </div>
+      </div>
+    </div>
+
     <div class="mint-form">
       <!-- Blind Mint Info -->
       <div v-if="!mintedPunk && !minting && isLaunched" class="blind-mint-info">
@@ -93,10 +130,10 @@
 
             <button
               @click="mint"
-              :disabled="minting || !canMint"
+              :disabled="minting || !canMint || !userMintLimit.canMint"
               class="btn btn-primary btn-mint"
             >
-              {{ !canMint ? 'All Punks Minted!' : '🎲 Mint Random Punk' }}
+              {{ !canMint ? 'All Punks Minted!' : !userMintLimit.canMint ? 'Daily Limit Reached' : '🎲 Mint Random Punk' }}
             </button>
           </div>
 
@@ -178,9 +215,10 @@ import {
   registerPunkMint,
   refreshSupplyFromNostr
 } from '@/utils/punkRegistry'
-import { publishPunkMint } from '@/utils/nostrRegistry'
+import { publishPunkMint, canUserMint } from '@/utils/nostrRegistry'
 import { loadIdentity } from '@/utils/arkadeWallet'
 import { PUNK_SUPPLY_CONFIG } from '@/config/arkade'
+import { getPublicKey } from 'nostr-tools'
 
 // Inject wallet from parent (App.vue)
 const wallet = inject<() => ArkadeWalletInterface | null>('getWallet')
@@ -248,6 +286,17 @@ const totalMinted = ref(0)
 const maxPunks = ref(0)
 const canMint = ref(true)
 
+// User mint limit tracking
+const userMintLimit = ref({
+  canMint: true,
+  mintsUsed: 0,
+  mintsRemaining: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+  maxMints: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+  timeWindow: '24h',
+  nextResetTime: undefined as Date | undefined
+})
+const checkingLimit = ref(false)
+
 const rarityScore = computed(() => {
   return revealedMetadata.value ? calculateRarityScore(revealedMetadata.value) : 0
 })
@@ -287,8 +336,46 @@ async function updateSupplyCounter() {
   }
 }
 
+async function checkUserMintLimit() {
+  const identity = loadIdentity()
+  if (!identity) {
+    console.log('⚠️ No identity found, cannot check mint limit')
+    return
+  }
+
+  checkingLimit.value = true
+
+  try {
+    // Get pubkey from private key
+    const pubkey = getPublicKey(identity.privateKey)
+    console.log('🔍 Checking mint limit for user:', pubkey.slice(0, 16) + '...')
+
+    // Check user's mint limit via Nostr
+    const limitInfo = await canUserMint(pubkey)
+    userMintLimit.value = limitInfo
+
+    console.log(`✅ User can mint: ${limitInfo.canMint}`)
+    console.log(`   Mints remaining: ${limitInfo.mintsRemaining} / ${limitInfo.maxMints}`)
+
+  } catch (error) {
+    console.error('Failed to check user mint limit:', error)
+    // On error, allow minting (fail open)
+    userMintLimit.value = {
+      canMint: true,
+      mintsUsed: 0,
+      mintsRemaining: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+      maxMints: PUNK_SUPPLY_CONFIG.MAX_MINTS_PER_ADDRESS,
+      timeWindow: '24h',
+      nextResetTime: undefined
+    }
+  } finally {
+    checkingLimit.value = false
+  }
+}
+
 onMounted(() => {
   updateSupplyCounter()
+  checkUserMintLimit()
 })
 
 async function mint() {
@@ -302,6 +389,24 @@ async function mint() {
   if (!canMintMorePunks()) {
     alert(`❌ All ${getMaxPunks()} ArkPunks have been minted!\n\nCheck the marketplace to buy existing punks.`)
     updateSupplyCounter()
+    return
+  }
+
+  // Check user mint limit
+  await checkUserMintLimit()
+  if (!userMintLimit.value.canMint) {
+    const resetTime = userMintLimit.value.nextResetTime
+      ? `\n\nYou can mint again after: ${userMintLimit.value.nextResetTime.toLocaleString()}`
+      : ''
+
+    alert(
+      `⏱️ Daily Mint Limit Reached\n\n` +
+      `You've used all ${userMintLimit.value.maxMints} mints for today.\n` +
+      `Mints used: ${userMintLimit.value.mintsUsed} / ${userMintLimit.value.maxMints}\n` +
+      `Time window: ${userMintLimit.value.timeWindow}${resetTime}\n\n` +
+      `This limit prevents spam and ensures fair distribution.\n` +
+      `Your limit will reset in ${userMintLimit.value.timeWindow}.`
+    )
     return
   }
 
@@ -400,8 +505,9 @@ async function mint() {
       console.log('✅ Punk registered in local supply:', getTotalMintedPunks(), '/', getMaxPunks())
     }
 
-    // Refresh supply counter
+    // Refresh supply counter and user mint limit
     await updateSupplyCounter()
+    await checkUserMintLimit()
 
     // 6. Set minted punk and revealed metadata for animation
     mintedPunk.value = mintEvent
@@ -1019,6 +1125,133 @@ h2 {
 
   .launch-info p strong {
     font-size: 15px;
+  }
+}
+
+/* User Mint Limit Styles */
+.user-mint-limit {
+  background: #1a1a1a;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.checking-limit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #333;
+  border-top-color: #ff6b35;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.limit-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.limit-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.limit-icon {
+  font-size: 20px;
+}
+
+.limit-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.limit-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.limit-bar {
+  width: 100%;
+  height: 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.limit-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80 0%, #22c55e 100%);
+  transition: width 0.5s ease;
+  border-radius: 4px;
+}
+
+.limit-fill.limit-full {
+  background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+}
+
+.limit-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.mints-remaining {
+  font-weight: 600;
+  color: #4ade80;
+}
+
+.mints-remaining.limit-reached {
+  color: #ef4444;
+}
+
+.mints-used {
+  color: #888;
+  font-size: 13px;
+}
+
+.limit-reset {
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 13px;
+  text-align: center;
+}
+
+.limit-note {
+  color: #888;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .user-mint-limit {
+    padding: 16px;
+  }
+
+  .limit-title {
+    font-size: 14px;
+  }
+
+  .limit-stats {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
 }
 </style>
