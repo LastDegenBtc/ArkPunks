@@ -16,6 +16,9 @@
           <button @click="currentView = 'marketplace'" :class="{ active: currentView === 'marketplace' }">
             Marketplace
           </button>
+          <button @click="currentView = 'stats'" :class="{ active: currentView === 'stats' }">
+            Stats
+          </button>
           <button @click="currentView = 'faq'" :class="{ active: currentView === 'faq' }">
             FAQ
           </button>
@@ -84,6 +87,10 @@
           <Marketplace />
         </div>
 
+        <div v-if="currentView === 'stats'" class="view">
+          <Stats />
+        </div>
+
         <div v-if="currentView === 'faq'" class="view">
           <FAQ />
         </div>
@@ -109,6 +116,7 @@ import { ref, provide, onMounted, computed, watch } from 'vue'
 import PunkCard from './components/PunkCard.vue'
 import MintPunk from './components/MintPunk.vue'
 import Marketplace from './components/Marketplace.vue'
+import Stats from './components/Stats.vue'
 import WalletConnect from './components/WalletConnect.vue'
 import FAQ from './components/FAQ.vue'
 import { PunkState } from './types/punk'
@@ -122,7 +130,7 @@ import { getPublicKey, nip19 } from 'nostr-tools'
 
 const walletConnectRef = ref<any>()
 
-const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'faq'>('gallery')
+const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'stats' | 'faq'>('gallery')
 const selectedPunk = ref<PunkState | null>(null)
 
 // Track which punks are currently listed

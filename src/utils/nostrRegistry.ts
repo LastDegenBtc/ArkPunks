@@ -421,6 +421,151 @@ export async function getPunksByL1Address(address: string): Promise<NostrEvent[]
 }
 
 /**
+ * Get sales history from Nostr
+ * Fetches all punk buy events and returns them sorted by timestamp (newest first)
+ */
+export async function getSalesHistory(): Promise<Array<{
+  id: string
+  punkId: string
+  punkIndex?: number
+  price: bigint
+  buyer: string
+  timestamp: number
+}>> {
+  try {
+    console.log('📊 Fetching sales history from Nostr...')
+
+    // Fetch all buy events (these are marketplace purchases)
+    const events = await pool.querySync(RELAYS, {
+      kinds: [32001], // PUNK_KIND for marketplace events
+      '#p': ['buy'],  // Filter for buy events
+      limit: 500      // Get last 500 sales
+    })
+
+    console.log(`   Found ${events.length} buy events`)
+
+    const sales = events
+      .map(event => {
+        try {
+          const content = JSON.parse(event.content)
+
+          // Extract punk ID and price from tags or content
+          const punkIdTag = event.tags.find(t => t[0] === 'punk')
+          const punkId = punkIdTag?.[1] || content.punkId
+
+          // Try to extract mint index if available
+          const punkIndexMatch = punkId?.match(/#(\d+)/)
+          const punkIndex = punkIndexMatch ? parseInt(punkIndexMatch[1]) : undefined
+
+          return {
+            id: event.id,
+            punkId: punkId || 'unknown',
+            punkIndex,
+            price: BigInt(content.price || content.salePrice || 0),
+            buyer: content.newOwner || content.buyer || event.pubkey,
+            timestamp: event.created_at * 1000 // Convert to milliseconds
+          }
+        } catch (error) {
+          console.warn('Failed to parse buy event:', error)
+          return null
+        }
+      })
+      .filter((sale): sale is NonNullable<typeof sale> => sale !== null)
+      .sort((a, b) => b.timestamp - a.timestamp) // Newest first
+
+    console.log(`✅ Loaded ${sales.length} sales`)
+
+    return sales
+  } catch (error) {
+    console.error('Failed to fetch sales history:', error)
+    return []
+  }
+}
+
+/**
+ * Get market statistics
+ * Calculates floor price, highest sale, total volume, etc.
+ */
+export async function getMarketStats(): Promise<{
+  floorPrice: bigint
+  highestSale: bigint
+  totalVolume: bigint
+  totalSales: number
+  averagePrice: bigint
+}> {
+  try {
+    console.log('📈 Calculating market statistics...')
+
+    // Get current listings for floor price
+    const listEvents = await pool.querySync(RELAYS, {
+      kinds: [32001],
+      '#p': ['list'],
+      limit: 100
+    })
+
+    // Get sales history for other stats
+    const sales = await getSalesHistory()
+
+    // Calculate floor price (lowest current listing)
+    let floorPrice = 0n
+    const activePrices: bigint[] = []
+
+    for (const event of listEvents) {
+      try {
+        const content = JSON.parse(event.content)
+        const price = BigInt(content.listingPrice || 0)
+        if (price > 0n) {
+          activePrices.push(price)
+        }
+      } catch (error) {
+        continue
+      }
+    }
+
+    if (activePrices.length > 0) {
+      floorPrice = activePrices.reduce((min, price) => price < min ? price : min)
+    }
+
+    // Calculate sales stats
+    let highestSale = 0n
+    let totalVolume = 0n
+
+    for (const sale of sales) {
+      if (sale.price > highestSale) {
+        highestSale = sale.price
+      }
+      totalVolume += sale.price
+    }
+
+    const totalSales = sales.length
+    const averagePrice = totalSales > 0 ? totalVolume / BigInt(totalSales) : 0n
+
+    console.log('✅ Market stats calculated:')
+    console.log(`   Floor: ${floorPrice} sats`)
+    console.log(`   Highest: ${highestSale} sats`)
+    console.log(`   Volume: ${totalVolume} sats`)
+    console.log(`   Sales: ${totalSales}`)
+
+    return {
+      floorPrice,
+      highestSale,
+      totalVolume,
+      totalSales,
+      averagePrice
+    }
+  } catch (error) {
+    console.error('Failed to calculate market stats:', error)
+    return {
+      floorPrice: 0n,
+      highestSale: 0n,
+      totalVolume: 0n,
+      totalSales: 0,
+      averagePrice: 0n
+    }
+  }
+}
+
+/**
  * Cleanup: Close all relay connections
  */
 export function closeNostrConnections(): void {
