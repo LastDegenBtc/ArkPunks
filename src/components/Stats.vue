@@ -173,7 +173,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { getSalesHistory, getMarketStats } from '@/utils/nostrRegistry'
+import { getSalesHistory, getMarketStats, getPunkMintEvent } from '@/utils/nostrRegistry'
 import { decompressPunkMetadata } from '@/utils/compression'
 import { generatePunkImage, calculateRarityScore } from '@/utils/generator'
 import type { PunkMetadata } from '@/types/punk'
@@ -300,19 +300,22 @@ async function refreshStats() {
   refreshing.value = false
 }
 
-function viewPunk(punkId: string) {
+async function viewPunk(punkId: string) {
   try {
-    // Extract compressed data from punkId (format: "punkId#compressedHex")
-    const parts = punkId.split('#')
-    if (parts.length < 2) {
-      console.error('Invalid punk ID format:', punkId)
-      alert('Unable to load punk details. Invalid punk ID format.')
+    console.log('📷 Loading punk details:', punkId.slice(0, 16) + '...')
+
+    // Fetch the original mint event to get compressed data
+    const mintEvent = await getPunkMintEvent(punkId)
+
+    if (!mintEvent || !mintEvent.compressedHex) {
+      console.error('❌ Could not fetch mint event for punk:', punkId)
+      alert('Unable to load punk details. The punk may not have been minted yet or the data is unavailable.')
       return
     }
 
-    const compressedHex = parts[1]
+    // Convert compressed hex to Uint8Array
     const compressedData = new Uint8Array(
-      compressedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+      mintEvent.compressedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
     )
 
     // Decompress metadata
@@ -331,10 +334,10 @@ function viewPunk(punkId: string) {
     }
     selectedPunkId.value = punkId
 
-    console.log('📷 Viewing punk:', metadata.name)
+    console.log('✅ Punk loaded:', metadata.name)
   } catch (error) {
     console.error('Failed to load punk details:', error)
-    alert('Unable to load punk details. The punk ID may be invalid or corrupted.')
+    alert('Unable to load punk details. An error occurred while fetching the data.')
   }
 }
 

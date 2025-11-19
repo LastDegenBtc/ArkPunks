@@ -423,6 +423,7 @@ export async function getPunksByL1Address(address: string): Promise<NostrEvent[]
 /**
  * Get sales history from Nostr
  * Fetches all punk sold events (kind 1339) and returns them sorted by timestamp (newest first)
+ * Only includes sales for punks that have recoverable data (mint or listing events)
  */
 export async function getSalesHistory(): Promise<Array<{
   id: string
@@ -446,6 +447,34 @@ export async function getSalesHistory(): Promise<Array<{
 
     console.log(`   Found ${events.length} sold events`)
 
+    // Get all unique punk IDs from sold events
+    const punkIds = new Set<string>()
+    for (const event of events) {
+      const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
+      if (punkIdTag) {
+        punkIds.add(punkIdTag[1])
+      }
+    }
+
+    // Fetch all mint events to verify which punks have recoverable data
+    console.log(`   Checking ${punkIds.size} unique punks for mint events...`)
+    const mintEvents = await pool.querySync(RELAYS, {
+      kinds: [KIND_PUNK_MINT],
+      limit: 1000
+    })
+
+    // Create a set of punk IDs that have mint events
+    const recoverablePunkIds = new Set<string>()
+    for (const event of mintEvents) {
+      const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
+      const dataTag = event.tags.find(t => t[0] === 'data')
+      if (punkIdTag && dataTag) {
+        recoverablePunkIds.add(punkIdTag[1])
+      }
+    }
+
+    console.log(`   Found ${recoverablePunkIds.size} punks with recoverable data`)
+
     const sales = events
       .map(event => {
         try {
@@ -460,6 +489,12 @@ export async function getSalesHistory(): Promise<Array<{
           }
 
           const punkId = punkIdTag[1]
+
+          // Skip sales for punks without recoverable data
+          if (!recoverablePunkIds.has(punkId)) {
+            console.log(`   ⏭️  Skipping sale for punk without data: ${punkId.slice(0, 16)}...`)
+            return null
+          }
 
           // Try to extract mint index if available
           const punkIndexMatch = punkId?.match(/#(\d+)/)
@@ -482,7 +517,7 @@ export async function getSalesHistory(): Promise<Array<{
       .filter((sale): sale is NonNullable<typeof sale> => sale !== null)
       .sort((a, b) => b.timestamp - a.timestamp) // Newest first
 
-    console.log(`✅ Loaded ${sales.length} sales`)
+    console.log(`✅ Loaded ${sales.length} sales with recoverable punk data`)
 
     return sales
   } catch (error) {
@@ -571,6 +606,87 @@ export async function getMarketStats(): Promise<{
       totalSales: 0,
       averagePrice: 0n
     }
+  }
+}
+
+/**
+ * Get the original mint event for a punk ID
+ * Returns the compressed data from the mint event
+ * If mint event not found, tries to fetch from listing events as fallback
+ */
+export async function getPunkMintEvent(punkId: string): Promise<{
+  compressedHex: string
+  owner: string
+  vtxo: string
+  index: number
+  mintedAt: number
+} | null> {
+  try {
+    console.log(`🔍 Fetching mint event for punk: ${punkId.slice(0, 16)}...`)
+
+    // First, try to get the mint event (KIND 1337)
+    const mintEvents = await pool.querySync(RELAYS, {
+      kinds: [KIND_PUNK_MINT],
+      '#punk_id': [punkId],
+      limit: 1
+    })
+
+    if (mintEvents.length > 0) {
+      const event = mintEvents[0]
+
+      // Extract data from tags
+      const dataTag = event.tags.find(t => t[0] === 'data')
+      const ownerTag = event.tags.find(t => t[0] === 'owner')
+      const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
+      const indexTag = event.tags.find(t => t[0] === 'index')
+
+      if (dataTag) {
+        console.log(`✅ Found mint event with compressed data`)
+        return {
+          compressedHex: dataTag[1],
+          owner: ownerTag?.[1] || event.pubkey,
+          vtxo: vtxoTag?.[1] || '',
+          index: indexTag ? parseInt(indexTag[1]) : 0,
+          mintedAt: event.created_at
+        }
+      }
+    }
+
+    // Fallback: Try to get data from listing events (KIND 1338)
+    console.log(`⚠️ No mint event found, trying listing events...`)
+    const KIND_PUNK_LISTING = 1338
+
+    const listingEvents = await pool.querySync(RELAYS, {
+      kinds: [KIND_PUNK_LISTING],
+      '#punk_id': [punkId],
+      limit: 10 // Get multiple to find one with compressed data
+    })
+
+    if (listingEvents.length > 0) {
+      // Find the most recent listing event that has compressed data
+      for (const event of listingEvents.sort((a, b) => b.created_at - a.created_at)) {
+        const compressedTag = event.tags.find(t => t[0] === 'compressed')
+        const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
+
+        if (compressedTag && compressedTag[1]) {
+          console.log(`✅ Found compressed data in listing event`)
+          return {
+            compressedHex: compressedTag[1],
+            owner: event.pubkey,
+            vtxo: vtxoTag?.[1] || '',
+            index: 0, // Unknown index from listing
+            mintedAt: event.created_at
+          }
+        }
+      }
+    }
+
+    console.warn(`❌ No mint or listing event found with compressed data for punk: ${punkId}`)
+    return null
+
+  } catch (error) {
+    console.error('Failed to fetch punk data:', error)
+    return null
   }
 }
 
