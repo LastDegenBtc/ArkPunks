@@ -496,14 +496,6 @@ const sendSuccess = ref(false)
 const exitPreparationStatus = ref('')
 const exitPreparationSuccess = ref(false)
 
-// Send modal state
-const showSendModal = ref(false)
-const sendRecipient = ref('')
-const sendAmount = ref(0)
-const sending = ref(false)
-const sendStatus = ref('')
-const sendSuccess = ref(false)
-
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
 const walletAddress = ref('')
 const boardingAddress = ref('') // bc1p... address for on-chain boarding
