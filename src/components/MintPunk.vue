@@ -2,37 +2,12 @@
   <div class="mint-punk">
     <h2>Mint a New Punk</h2>
 
-    <!-- Launch Countdown (shown before launch) -->
-    <div v-if="!isLaunched" class="launch-countdown">
-      <div class="countdown-container">
-        <h3>🚀 Official Launch Countdown</h3>
-        <p class="launch-date">November 21, 2025 at 12:00 CET</p>
-
-        <div class="countdown-timer">
-          <div class="time-block">
-            <span class="time-value">{{ countdown.days }}</span>
-            <span class="time-label">Days</span>
-          </div>
-          <div class="time-block">
-            <span class="time-value">{{ countdown.hours }}</span>
-            <span class="time-label">Hours</span>
-          </div>
-          <div class="time-block">
-            <span class="time-value">{{ countdown.minutes }}</span>
-            <span class="time-label">Minutes</span>
-          </div>
-          <div class="time-block">
-            <span class="time-value">{{ countdown.seconds }}</span>
-            <span class="time-label">Seconds</span>
-          </div>
-        </div>
-
-        <div class="launch-info">
-          <p><strong>Get Ready!</strong></p>
-          <p>✓ Create your wallet now</p>
-          <p>✓ Fund it with Bitcoin</p>
-          <p>✓ Be ready to mint one of the first 1,000 Official ArkPunks!</p>
-        </div>
+    <!-- Minting Disabled Message -->
+    <div v-if="!isLaunched" class="minting-disabled">
+      <div class="disabled-container">
+        <h3>⏸️ Minting Currently Unavailable</h3>
+        <p class="disabled-message">Minting is not available at this time.</p>
+        <p class="withdraw-info">If you have funds in your wallet, use the <strong>Send Sats</strong> button to withdraw them.</p>
       </div>
     </div>
 
@@ -956,175 +931,83 @@ h2 {
   color: #fff;
 }
 
-/* Launch Countdown Styles */
-.launch-countdown {
+/* Minting Disabled Styles */
+.minting-disabled {
   margin: 32px 0;
 }
 
-.countdown-container {
+.disabled-container {
   background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-  border: 2px solid #ff6b35;
+  border: 2px solid #666;
   border-radius: 12px;
   padding: 40px 20px;
   text-align: center;
-  box-shadow: 0 8px 32px rgba(255, 107, 53, 0.3);
 }
 
-.countdown-container h3 {
-  font-size: 32px;
-  margin: 0 0 12px 0;
-  color: #fff;
-  background: linear-gradient(45deg, #ff6b35, #ff8555);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.disabled-container h3 {
+  font-size: 28px;
+  margin: 0 0 16px 0;
+  color: #888;
 }
 
-.launch-date {
+.disabled-message {
   font-size: 18px;
   color: #aaa;
-  margin: 0 0 32px 0;
-  font-weight: 500;
+  margin: 0 0 16px 0;
 }
 
-.countdown-timer {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  max-width: 600px;
-  margin: 0 auto 32px auto;
-}
-
-.time-block {
-  background: #0a0a0a;
-  border: 2px solid #333;
+.withdraw-info {
+  font-size: 16px;
+  color: #ccc;
+  margin: 0;
+  padding: 16px;
+  background: rgba(136, 136, 136, 0.1);
+  border: 1px solid rgba(136, 136, 136, 0.3);
   border-radius: 8px;
-  padding: 20px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.time-value {
-  font-size: 48px;
-  font-weight: bold;
-  color: #ff6b35;
-  line-height: 1;
-}
-
-.time-label {
-  font-size: 14px;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.launch-info {
-  background: rgba(255, 107, 53, 0.1);
-  border: 1px solid rgba(255, 107, 53, 0.3);
-  border-radius: 8px;
-  padding: 24px;
   max-width: 500px;
   margin: 0 auto;
 }
 
-.launch-info p {
-  margin: 8px 0;
-  color: #ccc;
-  font-size: 16px;
-}
-
-.launch-info p strong {
-  color: #ff6b35;
-  font-size: 18px;
+.withdraw-info strong {
+  color: #4ade80;
 }
 
 /* Mobile responsive */
 @media (max-width: 768px) {
-  .countdown-container {
-    padding: 20px 12px;
+  .disabled-container {
+    padding: 24px 16px;
   }
 
-  .countdown-container h3 {
-    font-size: 20px;
+  .disabled-container h3 {
+    font-size: 22px;
   }
 
-  .launch-date {
-    font-size: 13px;
-    margin-bottom: 24px;
+  .disabled-message {
+    font-size: 16px;
   }
 
-  .countdown-timer {
-    gap: 8px;
-    max-width: 100%;
-  }
-
-  .time-block {
-    padding: 12px 6px;
-  }
-
-  .time-value {
-    font-size: 28px;
-  }
-
-  .time-label {
-    font-size: 10px;
-  }
-
-  .launch-info {
-    padding: 16px;
-  }
-
-  .launch-info p {
+  .withdraw-info {
     font-size: 14px;
+    padding: 12px;
   }
 }
 
 /* Extra small screens */
 @media (max-width: 480px) {
-  .countdown-container {
-    padding: 16px 8px;
+  .disabled-container {
+    padding: 20px 12px;
   }
 
-  .countdown-container h3 {
-    font-size: 18px;
-    line-height: 1.2;
+  .disabled-container h3 {
+    font-size: 20px;
   }
 
-  .launch-date {
-    font-size: 12px;
-    margin-bottom: 20px;
+  .disabled-message {
+    font-size: 14px;
   }
 
-  .countdown-timer {
-    gap: 6px;
-  }
-
-  .time-block {
-    padding: 10px 4px;
-    border-width: 1px;
-  }
-
-  .time-value {
-    font-size: 24px;
-  }
-
-  .time-label {
-    font-size: 9px;
-  }
-
-  .launch-info {
-    padding: 12px;
-    margin-top: 20px;
-  }
-
-  .launch-info p {
+  .withdraw-info {
     font-size: 13px;
-    margin: 6px 0;
-  }
-
-  .launch-info p strong {
-    font-size: 15px;
   }
 }
 
