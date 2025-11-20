@@ -256,13 +256,13 @@
                   v-model.number="sendAmount"
                   type="number"
                   min="1000"
-                  :max="Number(availableForMinting)"
+                  :max="Number(balance.available)"
                   placeholder="10000"
                   class="input-amount"
                 />
               </label>
               <p class="input-hint">
-                Minimum: 1,000 sats. You have {{ formatSats(availableForMinting) }} sats available.
+                Minimum: 1,000 sats. You have {{ formatSats(balance.available) }} sats available.
               </p>
             </div>
 
@@ -976,8 +976,8 @@ async function sendSats() {
     return
   }
 
-  if (BigInt(sendAmount.value) > availableForMinting.value) {
-    sendStatus.value = `Insufficient balance. You have ${formatSats(availableForMinting.value)} sats available.`
+  if (BigInt(sendAmount.value) > balance.value.available) {
+    sendStatus.value = `Insufficient balance. You have ${formatSats(balance.value.available)} sats available.`
     sendSuccess.value = false
     return
   }
