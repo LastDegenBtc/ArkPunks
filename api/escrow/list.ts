@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Get escrow wallet address
-    const escrowAddress = await getEscrowAddress()
+    const escrowAddress = getEscrowAddress()
 
     // Create escrow listing
     createEscrowListing({
