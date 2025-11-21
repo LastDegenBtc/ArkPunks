@@ -20,6 +20,10 @@ interface ListRequest {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('🔵 Escrow list endpoint called')
+  console.log('   Method:', req.method)
+  console.log('   Env check:', process.env.ESCROW_WALLET_ADDRESS ? 'SET' : 'NOT SET')
+
   // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -33,6 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       price,
       punkVtxoOutpoint
     } = req.body as ListRequest
+
+    console.log('   Received listing request for punk:', punkId)
 
     // Validate required fields
     if (!punkId || !sellerPubkey || !sellerArkAddress || !price || !punkVtxoOutpoint) {
