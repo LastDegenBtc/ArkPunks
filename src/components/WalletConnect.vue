@@ -195,10 +195,6 @@
           {{ refreshing ? 'Refreshing...' : '🔄 Refresh' }}
         </button>
 
-        <button @click="showSendModal = true" class="btn btn-send" :disabled="balance.available === 0n">
-          📤 Send
-        </button>
-
         <button @click="forceSettle" class="btn btn-settle" :disabled="!wallet">
           ℹ️ VTXO Status Info
         </button>
