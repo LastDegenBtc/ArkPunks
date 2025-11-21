@@ -23,9 +23,10 @@ async function generateEscrowWallet() {
     const privateKeyHex = privateKey.toString('hex')
 
     // Convert to Nostr format (nsec/npub)
-    const nsec = nip19.nsecEncode(privateKeyHex)
-    const publicKeyHex = getPublicKey(privateKey)
-    const npub = nip19.npubEncode(publicKeyHex)
+    // Note: nip19 functions expect Uint8Array, not hex strings
+    const nsec = nip19.nsecEncode(new Uint8Array(privateKey))
+    const publicKey = getPublicKey(new Uint8Array(privateKey))
+    const npub = nip19.npubEncode(publicKey)
 
     console.log('✅ Private key generated')
     console.log('   Keep this SECRET and secure!\n')
