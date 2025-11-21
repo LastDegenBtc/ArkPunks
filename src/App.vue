@@ -707,13 +707,58 @@ async function listPunk(punk: PunkState) {
       console.log('✅ Escrow listing created')
       console.log('   Escrow address:', escrowAddress)
 
-      // Show instructions to seller
-      alert(
+      // Automatically send punk to escrow
+      const sendConfirm = confirm(
         `🛡️ Escrow Listing Created!\n\n` +
-        `${escrowListing.message}\n\n` +
-        `📋 Next steps:\n` +
-        escrowListing.instructions.join('\n')
+        `Now send your punk to the escrow address.\n\n` +
+        `This will transfer ${punk.metadata.name} to escrow.\n` +
+        `Once a buyer pays, the server will automatically:\n` +
+        `• Send the punk to the buyer\n` +
+        `• Send payment to you (minus 1% fee)\n\n` +
+        `Ready to send punk to escrow?`
       )
+
+      if (!sendConfirm) {
+        alert(
+          `⚠️ Listing created but punk not sent to escrow.\n\n` +
+          `You must send it manually:\n` +
+          `Escrow address: ${escrowAddress}\n\n` +
+          `The listing won't be active until the punk is in escrow.`
+        )
+        return
+      }
+
+      // Send punk deposit to escrow (minimal amount to represent ownership)
+      console.log('📦 Sending punk deposit to escrow...')
+      const PUNK_DEPOSIT_AMOUNT = 1000n // 1000 sats deposit represents punk ownership
+
+      try {
+        // Check balance
+        const balance = await wallet.getBalance()
+        if (balance.available < PUNK_DEPOSIT_AMOUNT) {
+          throw new Error('Insufficient balance for punk deposit (need 1000 sats)')
+        }
+
+        // Send deposit to escrow address
+        const txid = await wallet.send(escrowAddress, PUNK_DEPOSIT_AMOUNT)
+        console.log('✅ Punk deposit sent to escrow! TXID:', txid)
+
+        alert(
+          `✅ Success!\n\n` +
+          `${punk.metadata.name} has been deposited to escrow.\n\n` +
+          `Your listing is now active in the marketplace!\n` +
+          `When a buyer purchases it, you'll receive ${price.toLocaleString()} sats automatically.`
+        )
+      } catch (sendError: any) {
+        console.error('❌ Failed to send punk deposit:', sendError)
+        alert(
+          `⚠️ Listing created but failed to send deposit:\n\n` +
+          `${sendError?.message || sendError}\n\n` +
+          `You can try sending 1000 sats manually to:\n` +
+          `${escrowAddress}`
+        )
+        return
+      }
     }
 
     // Publish listing to Nostr

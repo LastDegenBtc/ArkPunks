@@ -53,6 +53,19 @@ export interface BuyPunkResponse {
   instructions: string[]
 }
 
+export interface ExecuteSwapRequest {
+  punkId: string
+  buyerPubkey: string
+}
+
+export interface ExecuteSwapResponse {
+  success: boolean
+  punkId: string
+  punkTxid: string
+  paymentTxid: string
+  message: string
+}
+
 export interface EscrowStatusResponse {
   success: boolean
   listing?: EscrowListing
@@ -160,4 +173,30 @@ export async function getAllEscrowListings(): Promise<EscrowListing[]> {
   const data: EscrowStatusResponse = await response.json()
 
   return data.listings || []
+}
+
+/**
+ * Execute atomic swap for an escrow listing
+ *
+ * This should be called by the buyer after sending payment to escrow.
+ * The server will verify both deposits and execute the swap.
+ *
+ * @param request Execution details
+ * @returns Transaction IDs for punk and payment transfers
+ */
+export async function executeEscrowSwap(request: ExecuteSwapRequest): Promise<ExecuteSwapResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/escrow/execute`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request)
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to execute swap')
+  }
+
+  return response.json()
 }

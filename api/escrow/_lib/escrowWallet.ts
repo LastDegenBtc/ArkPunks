@@ -1,23 +1,18 @@
 /**
  * Escrow Wallet Management
  *
- * SIMPLIFIED: Returns static escrow address from environment variable
- * The actual wallet operations will be handled manually or via separate service
+ * SIMPLIFIED: Returns static escrow address
+ * The actual wallet operations will be handled by execute.ts
  */
 
-// Get escrow wallet address from environment
-const ESCROW_ADDRESS = process.env.ESCROW_WALLET_ADDRESS
-
-if (!ESCROW_ADDRESS) {
-  console.warn('⚠️ ESCROW_WALLET_ADDRESS not set - using placeholder')
-}
+import { ESCROW_ADDRESS } from './escrowStore.js'
 
 /**
- * Get the escrow wallet address (for receiving punk VTXOs)
+ * Get the escrow wallet address (for receiving punk VTXOs and payments)
  */
 export function getEscrowAddress(): string {
   if (!ESCROW_ADDRESS) {
-    throw new Error('Escrow address not configured - set ESCROW_WALLET_ADDRESS environment variable')
+    throw new Error('Escrow address not configured')
   }
   return ESCROW_ADDRESS
 }
