@@ -13,7 +13,11 @@
           <button @click="currentView = 'mint'" :class="{ active: currentView === 'mint' }">
             Mint
           </button>
-          <button @click="currentView = 'marketplace'" :class="{ active: currentView === 'marketplace' }">
+          <button
+            v-if="isMarketplaceAvailable"
+            @click="currentView = 'marketplace'"
+            :class="{ active: currentView === 'marketplace' }"
+          >
             Marketplace
           </button>
           <button @click="currentView = 'stats'" :class="{ active: currentView === 'stats' }">
@@ -77,7 +81,7 @@
           <MintPunk />
         </div>
 
-        <div v-if="currentView === 'marketplace'" class="view">
+        <div v-if="currentView === 'marketplace' && isMarketplaceAvailable" class="view">
           <Marketplace />
         </div>
 
@@ -121,8 +125,30 @@ import { listPunkForSale, delistPunk, getMarketplaceListings, getSoldPunkIds, sy
 import { compressPunkMetadata } from './utils/compression'
 import { hex } from '@scure/base'
 import { getPublicKey, nip19 } from 'nostr-tools'
+import { PUNK_SUPPLY_CONFIG, getActiveConfig } from './config/arkade'
 
 const walletConnectRef = ref<any>()
+
+// Check if marketplace is available (only after launch in production)
+const isMarketplaceAvailable = computed(() => {
+  const config = getActiveConfig()
+
+  // Always show in dev/testnet
+  if (config.network !== 'mainnet') {
+    return true
+  }
+
+  // TEMPORARY: Always show on dev preview URL for testing
+  if (typeof window !== 'undefined' && window.location.hostname.includes('arkpunks-git-dev')) {
+    return true
+  }
+
+  // In production, check if we've reached launch time
+  const now = Date.now()
+  const launchTime = new Date(PUNK_SUPPLY_CONFIG.LAUNCH_DATE).getTime()
+
+  return now >= launchTime
+})
 
 const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'stats' | 'faq'>('gallery')
 const selectedPunk = ref<PunkState | null>(null)

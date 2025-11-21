@@ -232,19 +232,13 @@ export async function createArkadeWallet(
           return 0n
         }
 
-        // CRITICAL FIX: Calculate true spendable balance by checking VTXO states
-        // The SDK's balance.available includes "preconfirmed" VTXOs that the server rejects
-        // We must check each VTXO's state manually - only "settled" VTXOs are spendable
-        let spendableBalance = 0n
+        // Log VTXO details for debugging
         try {
           // Get all VTXOs with detailed information
           const allVtxos = await wallet.getVtxos()
 
           console.log('📋 VTXO Breakdown:')
           console.log('   Total VTXOs:', allVtxos.length)
-
-          const spendableVtxos: any[] = []
-          const nonSpendableVtxos: any[] = []
 
           // Log each VTXO's state for debugging
           if (allVtxos.length > 0) {
@@ -253,36 +247,18 @@ export async function createArkadeWallet(
               const amount = vtxo.value ?? vtxo.amount ?? 0
               const state = vtxo.virtualStatus?.state || 'unknown'
               const isSpent = vtxo.isSpent || false
-              const canSpend = isVtxoSpendable(vtxo)
 
               console.log(`   VTXO ${index + 1}:`, {
                 amount: amount.toString() + ' sats',
                 state: state,
                 isSpent: isSpent,
-                canSpend: canSpend,
                 txid: vtxo.txid?.slice(0, 16) + '...',
                 vout: vtxo.vout
               })
-
-              if (canSpend) {
-                spendableVtxos.push(vtxo)
-              } else {
-                nonSpendableVtxos.push(vtxo)
-              }
             })
           }
-
-          console.log('   Spendable VTXOs (settled/preconfirmed):', spendableVtxos.length)
-          console.log('   Non-spendable VTXOs (swept):', nonSpendableVtxos.length)
-
-          spendableBalance = spendableVtxos.reduce((sum: bigint, vtxo: any) => {
-            const amount = vtxo.value ?? vtxo.amount ?? 0
-            return sum + BigInt(amount)
-          }, 0n)
-          console.log('✅ Calculated TRUE spendable balance:', spendableBalance.toString(), 'sats')
         } catch (error) {
-          console.warn('⚠️  Failed to get spendable VTXOs, falling back to balance.available:', error)
-          spendableBalance = toBigInt(balance.available)
+          console.warn('⚠️  Failed to get VTXO details:', error)
         }
 
         const recoverableAmount = toBigInt(balance.recoverable)
@@ -292,9 +268,11 @@ export async function createArkadeWallet(
           console.warn('⚠️  This typically takes 1-2 minutes from when they were created/received')
         }
 
+        // Trust the SDK's balance calculations - it knows better than we do
+        // The SDK's balance.available field already accounts for what's truly spendable
         return {
           boarding: toBigInt(balance.boarding),
-          available: spendableBalance, // Use calculated spendable balance instead of SDK's available
+          available: toBigInt(balance.available), // Trust SDK's available balance
           settled: toBigInt(balance.settled),
           preconfirmed: toBigInt(balance.preconfirmed),
           recoverable: recoverableAmount,
