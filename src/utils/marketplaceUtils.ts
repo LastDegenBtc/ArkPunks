@@ -43,6 +43,7 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
     // Determine current network (default to mainnet if not set)
     const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
     console.log(`📊 Marketplace: Filtering for network: ${currentNetwork}`)
+    console.log(`   VITE_ARKADE_NETWORK env var: "${import.meta.env.VITE_ARKADE_NETWORK}"`)
 
     // Query for ALL listing events (including delist events) AND sold events
     const [listingEvents, soldEvents] = await Promise.all([
@@ -57,6 +58,19 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
         limit: 1000
       })
     ])
+
+    console.log(`   Found ${listingEvents.length} listing events, ${soldEvents.length} sold events`)
+
+    // Debug: Log first few listings
+    if (listingEvents.length > 0) {
+      console.log(`   📋 Sample listings (first 3):`)
+      listingEvents.slice(0, 3).forEach((e, i) => {
+        const networkTag = e.tags.find(t => t[0] === 'network')
+        const punkIdTag = e.tags.find(t => t[0] === 'punk_id')
+        const priceTag = e.tags.find(t => t[0] === 'price')
+        console.log(`      ${i + 1}. Punk ${punkIdTag?.[1]} - ${priceTag?.[1]} sats - network: "${networkTag?.[1]}"`)
+      })
+    }
 
     // Create a map of sold punks with their sold timestamp
     const soldPunksMap = new Map<string, number>()

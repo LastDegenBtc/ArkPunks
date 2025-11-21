@@ -50,6 +50,7 @@ export async function getNostrSupply(): Promise<{
     // Determine current network (default to mainnet if not set)
     const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
     console.log(`   Filtering for network: ${currentNetwork}`)
+    console.log(`   VITE_ARKADE_NETWORK env var: "${import.meta.env.VITE_ARKADE_NETWORK}"`)
 
     // Fetch all punk mint events (kind 1400) for current network only
     const events = await pool.querySync(RELAYS, {
@@ -60,6 +61,16 @@ export async function getNostrSupply(): Promise<{
     })
 
     console.log(`   Found ${events.length} punk mint events on Nostr`)
+
+    // Debug: Log first few events to see their network tags
+    if (events.length > 0) {
+      console.log(`   📋 Sample events (first 3):`)
+      events.slice(0, 3).forEach((e, i) => {
+        const networkTag = e.tags.find(t => t[0] === 'network')
+        const punkIdTag = e.tags.find(t => t[0] === 'punk_id')
+        console.log(`      ${i + 1}. Punk ${punkIdTag?.[1]} - network: "${networkTag?.[1]}"`)
+      })
+    }
 
     // Deduplicate by punkId (keep earliest)
     const punkMap = new Map<string, NostrEvent>()
