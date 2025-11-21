@@ -219,6 +219,9 @@ export async function listPunkForSale(
   try {
     const pubkey = getPublicKey(hex.decode(privateKey))
 
+    // Determine current network for event tagging
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
+
     const tags: string[][] = [
       ['t', 'arkade-punk-listing'],
       ['punk_id', punkId],
@@ -226,7 +229,8 @@ export async function listPunkForSale(
       ['vtxo', vtxoOutpoint],
       ['compressed', compressedHex],
       ['ark_address', arkAddress],
-      ['sale_mode', saleMode]
+      ['sale_mode', saleMode],
+      ['network', currentNetwork]  // Add network tag for filtering
     ]
 
     // Add escrow address if in escrow mode
@@ -268,6 +272,9 @@ export async function delistPunk(
   try {
     const pubkey = getPublicKey(hex.decode(privateKey))
 
+    // Determine current network for event tagging
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
+
     // Publish a "delist" event (price = 0)
     const eventTemplate: EventTemplate = {
       kind: KIND_PUNK_LISTING,
@@ -276,6 +283,7 @@ export async function delistPunk(
         ['t', 'arkade-punk-delist'],
         ['punk_id', punkId],
         ['price', '0'],
+        ['network', currentNetwork]  // Add network tag for filtering
       ],
       content: `Punk ${punkId} delisted`
     }
@@ -309,6 +317,9 @@ export async function publishPunkSold(
   try {
     const buyerPubkey = getPublicKey(hex.decode(privateKey))
 
+    // Determine current network for event tagging
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
+
     const eventTemplate: EventTemplate = {
       kind: KIND_PUNK_SOLD,
       created_at: Math.floor(Date.now() / 1000),
@@ -318,7 +329,8 @@ export async function publishPunkSold(
         ['seller', sellerPubkey],
         ['buyer', buyerPubkey],
         ['price', price],
-        ['txid', txid]
+        ['txid', txid],
+        ['network', currentNetwork]  // Add network tag for filtering
       ],
       content: `Punk ${punkId} sold to ${buyerPubkey.slice(0, 8)}... for ${price} sats`
     }
@@ -350,6 +362,9 @@ export async function publishPunkTransfer(
   const pool = new SimplePool()
 
   try {
+    // Determine current network for event tagging
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
+
     const eventTemplate: EventTemplate = {
       kind: KIND_PUNK_TRANSFER,
       created_at: Math.floor(Date.now() / 1000),
@@ -358,7 +373,8 @@ export async function publishPunkTransfer(
         ['punk_id', punkId],
         ['from', fromPubkey],
         ['to', toPubkey],
-        ['txid', txid]
+        ['txid', txid],
+        ['network', currentNetwork]  // Add network tag for filtering
       ],
       content: `Punk ${punkId} transferred from ${fromPubkey.slice(0, 8)}... to ${toPubkey.slice(0, 8)}...`
     }
