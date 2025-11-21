@@ -36,8 +36,30 @@ export async function initEscrowWallet() {
     arkServerUrl: isMainnet ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh',
   })
 
+  const address = await wallet.getAddress()
+  const balance = await wallet.getBalance()
+
   console.log('🔐 Escrow wallet initialized')
-  console.log('   Address:', await wallet.getAddress())
+  console.log('   Address:', address)
+  console.log('   Balance:', balance.available, 'sats')
+
+  // Verify address matches environment variable
+  const expectedAddress = process.env.ESCROW_WALLET_ADDRESS
+  if (expectedAddress && address !== expectedAddress) {
+    console.warn('⚠️  WARNING: Wallet address mismatch!')
+    console.warn(`   Expected: ${expectedAddress}`)
+    console.warn(`   Got:      ${address}`)
+    console.warn('   Make sure ESCROW_WALLET_PRIVATE_KEY matches ESCROW_WALLET_ADDRESS')
+  }
+
+  // Check if wallet has sufficient liquidity
+  const MIN_BALANCE = 10000n // 10,000 sats minimum recommended
+  if (BigInt(balance.available) < MIN_BALANCE) {
+    console.warn('⚠️  WARNING: Low escrow wallet balance!')
+    console.warn(`   Current: ${balance.available} sats`)
+    console.warn(`   Recommended: ${MIN_BALANCE} sats minimum`)
+    console.warn('   Please add funds to ensure smooth operation')
+  }
 
   return wallet
 }
@@ -161,6 +183,24 @@ async function executeAtomicSwap(
     console.log(`   Transferring payment to seller: ${listing.sellerArkAddress}`)
     console.log(`   Seller receives: ${sellerAmount} sats`)
     console.log(`   Marketplace fee: ${fee} sats (${0.5}%)`)
+
+    // Check wallet balance before executing swap
+    const balance = await wallet.getBalance()
+    const availableBalance = BigInt(balance.available)
+
+    // Estimate total needed: punk value (1000) + seller amount + estimated tx fees (1000 buffer)
+    const estimatedTxFees = 1000n
+    const totalNeeded = 1000n + sellerAmount + estimatedTxFees
+
+    console.log(`   Available balance: ${availableBalance} sats`)
+    console.log(`   Estimated needed: ${totalNeeded} sats (including ~${estimatedTxFees} sats tx fees)`)
+
+    if (availableBalance < totalNeeded) {
+      console.error(`   ❌ Insufficient balance for swap!`)
+      console.error(`   Need: ${totalNeeded} sats, Have: ${availableBalance} sats`)
+      console.error(`   Please add funds to escrow wallet`)
+      return false
+    }
 
     // Step 1: Transfer punk VTXO to buyer
     // In Arkade, we need to send the specific VTXO

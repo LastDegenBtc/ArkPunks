@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
     "demo": "tsx demo-compression.ts",
-    "test:compression": "tsx test-compression.ts"
+    "test:compression": "tsx test-compression.ts",
+    "escrow:generate": "tsx scripts/generate-escrow-wallet.ts",
+    "escrow:check": "curl -X POST http://localhost:5173/api/escrow/process"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.3.4",
