@@ -138,6 +138,11 @@ const isMarketplaceAvailable = computed(() => {
     return true
   }
 
+  // TEMPORARY: Always show on dev preview URL for testing
+  if (typeof window !== 'undefined' && window.location.hostname.includes('arkpunks-git-dev')) {
+    return true
+  }
+
   // In production, check if we've reached launch time
   const now = Date.now()
   const launchTime = new Date(PUNK_SUPPLY_CONFIG.LAUNCH_DATE).getTime()
