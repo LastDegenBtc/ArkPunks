@@ -40,14 +40,20 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
   const pool = new SimplePool()
 
   try {
+    // Determine current network
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'testnet'
+    console.log(`📊 Marketplace: Filtering for network: ${currentNetwork}`)
+
     // Query for ALL listing events (including delist events) AND sold events
     const [listingEvents, soldEvents] = await Promise.all([
       pool.querySync(RELAYS, {
         kinds: [KIND_PUNK_LISTING],
+        '#network': [currentNetwork], // Filter by network
         limit: 1000
       }),
       pool.querySync(RELAYS, {
         kinds: [KIND_PUNK_SOLD],
+        '#network': [currentNetwork], // Filter by network
         limit: 1000
       })
     ])
@@ -421,13 +427,18 @@ export async function syncPunksFromNostr(
     console.log(`   Total unique mint events: ${mintEvents.length}`)
 
     // Query for all sold events and transfer events
+    // Determine current network
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'testnet'
+
     const [soldEvents, transferEvents] = await Promise.all([
       pool.querySync(RELAYS, {
         kinds: [KIND_PUNK_SOLD],
+        '#network': [currentNetwork], // Filter by network
         limit: 1000
       }),
       pool.querySync(RELAYS, {
         kinds: [KIND_PUNK_TRANSFER],
+        '#network': [currentNetwork], // Filter by network
         limit: 1000
       })
     ])
