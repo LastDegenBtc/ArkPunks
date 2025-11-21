@@ -18,12 +18,6 @@
       "maxDuration": 10
     }
   },
-  "crons": [
-    {
-      "path": "/api/escrow/process",
-      "schedule": "* * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/assets/(.*)",
