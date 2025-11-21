@@ -21,6 +21,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('⚙️ Escrow processor endpoint called')
   console.log('   Method:', req.method)
   console.log('   Time:', new Date().toISOString())
+  console.log('   Env check:')
+  console.log('     - ESCROW_WALLET_ADDRESS:', process.env.ESCROW_WALLET_ADDRESS ? 'SET ✓' : 'NOT SET ✗')
+  console.log('     - ESCROW_WALLET_PRIVATE_KEY:', process.env.ESCROW_WALLET_PRIVATE_KEY ? 'SET ✓' : 'NOT SET ✗')
+  console.log('     - VITE_ARKADE_NETWORK:', process.env.VITE_ARKADE_NETWORK || 'testnet (default)')
 
   // Allow both GET and POST
   if (req.method !== 'GET' && req.method !== 'POST') {
