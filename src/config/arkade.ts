@@ -63,8 +63,7 @@ export const SERVER_SIGNING_CONFIG = {
   // Whitelist of punks minted before signature system was implemented
   // These are considered official even without server signature
   LEGACY_WHITELIST: [
-    '4315737c48d9f52eb87abcf5a14fa59d1be9a5c6c97ea8a926d18ef94e09c63a', // Your first punk
-    // Add other legitimate pre-signature punks here
+    '4315737c9950cdc2797ab2caf6f3d208916d9a7b4f324550dde544fbbab0daaf',
   ] as string[]
 }
 
