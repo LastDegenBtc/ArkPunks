@@ -47,10 +47,15 @@ export async function getNostrSupply(): Promise<{
   try {
     console.log('📡 Fetching punk supply from Nostr relays...')
 
-    // Fetch all punk mint events (kind 1400)
+    // Determine current network
+    const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'testnet'
+    console.log(`   Filtering for network: ${currentNetwork}`)
+
+    // Fetch all punk mint events (kind 1400) for current network only
     const events = await pool.querySync(RELAYS, {
       kinds: [KIND_PUNK_MINT],
       '#t': ['arkade-punk'],
+      '#network': [currentNetwork], // Filter by network tag
       limit: PUNK_SUPPLY_CONFIG.MAX_TOTAL_PUNKS + 100 // Fetch a bit more to be safe
     })
 
