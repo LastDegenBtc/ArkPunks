@@ -45,6 +45,22 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
     console.log(`📊 Marketplace: Filtering for network: ${currentNetwork}`)
     console.log(`   VITE_ARKADE_NETWORK env var: "${import.meta.env.VITE_ARKADE_NETWORK}"`)
 
+    // DEBUG: First query ALL listings without network filter to see if events exist at all
+    const allListingsDebug = await pool.querySync(RELAYS, {
+      kinds: [KIND_PUNK_LISTING],
+      limit: 100
+    })
+    console.log(`   🔍 DEBUG: Found ${allListingsDebug.length} total listing events (no network filter)`)
+    if (allListingsDebug.length > 0) {
+      console.log(`   🔍 DEBUG: Sample events (first 5):`)
+      allListingsDebug.slice(0, 5).forEach((e, i) => {
+        const networkTag = e.tags.find(t => t[0] === 'network')
+        const punkIdTag = e.tags.find(t => t[0] === 'punk_id')
+        const priceTag = e.tags.find(t => t[0] === 'price')
+        console.log(`      ${i + 1}. Punk ${punkIdTag?.[1]?.slice(0, 8)}... - ${priceTag?.[1]} sats - network: "${networkTag?.[1]}"`)
+      })
+    }
+
     // Query for ALL listing events (including delist events) AND sold events
     const [listingEvents, soldEvents] = await Promise.all([
       pool.querySync(RELAYS, {
@@ -59,7 +75,7 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
       })
     ])
 
-    console.log(`   Found ${listingEvents.length} listing events, ${soldEvents.length} sold events`)
+    console.log(`   Found ${listingEvents.length} listing events (with network filter), ${soldEvents.length} sold events`)
 
     // Debug: Log first few listings
     if (listingEvents.length > 0) {
