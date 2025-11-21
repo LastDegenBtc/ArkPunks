@@ -74,10 +74,20 @@
             </div>
           </div>
 
-          <!-- DISABLED: Marketplace buying temporarily disabled -->
-          <div v-if="!isOwnPunk(punk)" class="buy-disabled-label">
-            <span>💱 Buying coming soon</span>
-            <small>Waiting for atomic swaps</small>
+          <!-- Buy button (escrow mode) or disabled (P2P mode) -->
+          <div v-if="!isOwnPunk(punk)">
+            <button
+              v-if="punk.saleMode === 'escrow'"
+              @click="buyPunk(punk)"
+              :disabled="buying"
+              class="btn btn-buy"
+            >
+              {{ buying ? '⏳ Processing...' : '💰 Buy Now' }}
+            </button>
+            <div v-else class="buy-disabled-label">
+              <span>💱 P2P mode</span>
+              <small>Coming soon</small>
+            </div>
           </div>
 
           <div v-else class="own-punk-label">
@@ -126,6 +136,7 @@ import { ref, onMounted, inject, computed } from 'vue'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
 import { getMarketplaceListings, publishPunkSold } from '@/utils/marketplaceUtils'
 import { getOfficialPunksList } from '@/utils/officialPunkValidator'
+import { buyPunkFromEscrow } from '@/utils/escrowApi'
 import { getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
 
@@ -141,6 +152,8 @@ interface MarketplaceListing {
   vtxoOutpoint: string
   isOfficial: boolean
   officialIndex?: number
+  saleMode?: 'escrow' | 'p2p'
+  escrowAddress?: string
 }
 
 const listedPunks = ref<MarketplaceListing[]>([])
@@ -284,18 +297,10 @@ async function loadListings() {
 }
 
 /**
- * DISABLED: This function has a critical bug - it sends payment to seller
- * but doesn't transfer the punk VTXO, resulting in the seller keeping both
- * the payment AND the punk. This is because Arkade doesn't support atomic
- * swaps yet. We need to implement an escrow/coordinator system or wait for
- * Arkade to add atomic swap support before re-enabling marketplace purchases.
+ * Buy a punk using escrow system
+ * The server handles the atomic swap automatically
  */
 async function buyPunk(punk: MarketplaceListing) {
-  alert('Marketplace buying is temporarily disabled while we implement atomic swaps.')
-  return
-
-  // DISABLED CODE BELOW - DO NOT USE UNTIL ATOMIC SWAPS ARE IMPLEMENTED
-
   const currentWallet = wallet?.()
   if (!currentWallet) {
     alert('Please connect your wallet first!')
@@ -307,15 +312,30 @@ async function buyPunk(punk: MarketplaceListing) {
     return
   }
 
-  const total = calculateTotal(punk.listingPrice)
+  // Only escrow mode is supported for now
+  if (punk.saleMode !== 'escrow') {
+    alert('P2P mode is not yet available. Only escrow purchases are supported.')
+    return
+  }
+
+  if (!punk.escrowAddress) {
+    alert('Escrow address not found for this listing.')
+    return
+  }
+
   const fee = calculateFee(punk.listingPrice)
+  const total = calculateTotal(punk.listingPrice)
 
   const confirmed = confirm(
-    `Buy ${punk.metadata.name}?\n\n` +
+    `🛡️ Buy ${punk.metadata.name} via Escrow?\n\n` +
     `Price: ${formatSats(punk.listingPrice)} sats\n` +
     `Marketplace fee (1%): ${formatSats(fee)} sats\n` +
     `Total: ${formatSats(total)} sats\n\n` +
-    `This will transfer the punk to your wallet off-chain.`
+    `How it works:\n` +
+    `1. You send payment to escrow address\n` +
+    `2. Server automatically transfers punk to you\n` +
+    `3. Server pays seller (minus 1% fee)\n\n` +
+    `Continue?`
   )
 
   if (!confirmed) return
@@ -323,78 +343,64 @@ async function buyPunk(punk: MarketplaceListing) {
   buying.value = true
 
   try {
+    console.log('🔐 Starting escrow purchase...')
+
     // Check balance
     const balance = await currentWallet.getBalance()
-
     if (balance.available < Number(total)) {
-      throw new Error(`Insufficient balance. You need ${formatSats(total)} sats but only have ${balance.available.toLocaleString()} sats available.`)
+      throw new Error(
+        `Insufficient balance.\n\n` +
+        `Need: ${formatSats(total)} sats\n` +
+        `Have: ${balance.available.toLocaleString()} sats`
+      )
     }
 
-    // Send payment to seller via Arkade off-chain transfer
-    const txid = await currentWallet.send(
-      punk.ownerArkAddress,
-      total
-    )
-
-    // Publish "punk sold" event to Nostr to remove from marketplace
+    // Get user's Nostr pubkey and Arkade address
     const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    if (privateKeyHex) {
-      try {
-        await publishPunkSold(punk.punkId, punk.owner, punk.listingPrice.toString(), txid, privateKeyHex)
-      } catch (publishError) {
-        console.error('Failed to publish sold event:', publishError)
-        // Don't fail the entire purchase if sold event fails
-      }
+    if (!privateKeyHex) {
+      throw new Error('Wallet private key not found')
     }
 
-    // Update punk ownership in localStorage
-    const punksJson = localStorage.getItem('arkade_punks')
-    if (punksJson) {
-      const punks = JSON.parse(punksJson)
-      const punkIndex = punks.findIndex((p: any) => p.punkId === punk.punkId)
+    const buyerPubkey = getPublicKey(hex.decode(privateKeyHex))
+    const buyerArkAddress = currentWallet.arkAddress
 
-      if (punkIndex !== -1) {
-        // Update existing punk owner
-        punks[punkIndex].owner = currentWallet.address
-      } else {
-        // Add punk to buyer's collection
-        punks.push({
-          punkId: punk.punkId,
-          owner: currentWallet.address,
-          ...punk.metadata,
-          vtxoOutpoint: punk.vtxoOutpoint
-        })
-      }
+    // Initiate escrow purchase
+    console.log(`📋 Requesting purchase for punk ${punk.punkId}`)
+    const purchaseResponse = await buyPunkFromEscrow({
+      punkId: punk.punkId,
+      buyerPubkey,
+      buyerArkAddress
+    })
 
-      localStorage.setItem('arkade_punks', JSON.stringify(punks))
-    } else {
-      // First punk for this wallet
-      const punks = [{
-        punkId: punk.punkId,
-        owner: currentWallet.address,
-        ...punk.metadata,
-        vtxoOutpoint: punk.vtxoOutpoint
-      }]
-      localStorage.setItem('arkade_punks', JSON.stringify(punks))
-    }
+    console.log('✅ Purchase instructions received:', purchaseResponse)
 
-    // Reload listings to remove purchased punk
-    await loadListings()
+    // Send payment to escrow address
+    console.log(`💰 Sending ${formatSats(total)} sats to escrow: ${purchaseResponse.escrowAddress}`)
+    const txid = await currentWallet.send(purchaseResponse.escrowAddress, total)
 
-    // Reload user's punk gallery
-    if (reloadPunks) {
-      await reloadPunks()
-    }
+    console.log(`✅ Payment sent! TXID: ${txid}`)
 
     alert(
-      `✅ Purchase successful!\n\n` +
-      `${punk.metadata.name} is now in your gallery!\n` +
-      `Transaction ID: ${txid.slice(0, 16)}...`
+      `✅ Payment sent to escrow!\n\n` +
+      `The server will now:\n` +
+      `1. Verify your payment\n` +
+      `2. Transfer the punk to you\n` +
+      `3. Pay the seller\n\n` +
+      `This happens automatically within seconds.\n\n` +
+      `Refresh the page in a moment to see your new punk!`
     )
+
+    // Reload listings and gallery after a delay to allow server to process
+    setTimeout(async () => {
+      await loadListings()
+      if (reloadPunks) {
+        await reloadPunks()
+      }
+    }, 3000)
 
   } catch (error: any) {
     console.error('❌ Failed to buy punk:', error)
-    alert(`Failed to buy punk: ${error?.message || error}`)
+    alert(`Purchase failed:\n\n${error?.message || error}`)
   } finally {
     buying.value = false
   }
