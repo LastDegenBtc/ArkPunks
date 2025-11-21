@@ -6,6 +6,7 @@
 import { SimplePool, type Event as NostrEvent, finalizeEvent, type EventTemplate, getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
 import { decompressPunkMetadata } from './compression'
+import { getOfficialPunksList } from './officialPunkValidator'
 
 const RELAYS = [
   'wss://relay.damus.io',
@@ -132,10 +133,28 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
 
     console.log(`📊 Marketplace: ${latestEventsByPunk.size} unique punks with listings`)
 
+    // Load official punks list to filter out non-official collections
+    console.log('🔍 Loading official punks list...')
+    const { punkIds: officialPunkIds } = await getOfficialPunksList()
+    const officialPunkSet = new Set(officialPunkIds)
+    console.log(`   Found ${officialPunkIds.length} official punks`)
+
+    // Filter to only include official punks
+    const officialListings = new Map<string, NostrEvent>()
+    for (const [punkId, event] of latestEventsByPunk.entries()) {
+      if (officialPunkSet.has(punkId)) {
+        officialListings.set(punkId, event)
+      } else {
+        console.log(`   ⏭️  Skipping non-official punk: ${punkId.slice(0, 8)}...`)
+      }
+    }
+
+    console.log(`📊 Marketplace: ${officialListings.size} official punks with listings (filtered from ${latestEventsByPunk.size} total)`)
+
     // Parse listings from latest events only
     const listings: MarketplaceListing[] = []
 
-    for (const event of latestEventsByPunk.values()) {
+    for (const event of officialListings.values()) {
       try {
         const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
         const priceTag = event.tags.find(t => t[0] === 'price')

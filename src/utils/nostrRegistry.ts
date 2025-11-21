@@ -158,7 +158,39 @@ export async function publishPunkMint(
       return false
     }
 
-    // Create mint event
+    // Get user's Nostr pubkey
+    const userPubkey = getPublicKey(privateKey)
+
+    // Request server authorization and signature
+    console.log('🔐 Requesting server authorization...')
+    let serverSignature = ''
+
+    try {
+      const authResponse = await fetch('/api/mint/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          punkId,
+          userPubkey,
+          currentSupply: supply.totalMinted
+        })
+      })
+
+      if (!authResponse.ok) {
+        const error = await authResponse.json()
+        console.error('❌ Server authorization failed:', error)
+        throw new Error(error.error || 'Authorization failed')
+      }
+
+      const authData = await authResponse.json()
+      serverSignature = authData.signature
+      console.log('✅ Server signature received:', serverSignature.slice(0, 32) + '...')
+    } catch (error: any) {
+      console.error('❌ Failed to get server authorization:', error)
+      throw new Error(`Mint authorization failed: ${error.message}`)
+    }
+
+    // Create mint event WITH server signature
     const eventTemplate: EventTemplate = {
       kind: KIND_PUNK_MINT,
       created_at: Math.floor(Date.now() / 1000),
@@ -171,6 +203,7 @@ export async function publishPunkMint(
         ['data', compressedData],       // 6-byte compressed metadata
         ['index', supply.totalMinted.toString()], // Mint index (0-999)
         ['network', 'mainnet'],         // Network
+        ['server_sig', serverSignature], // ✅ Server signature - proves official mint
       ],
       content: `Arkade Punk #${supply.totalMinted} minted on Arkade Protocol 🎨\n\nPunk ID: ${punkId}\nVTXO: ${vtxoOutpoint}\nSupply: ${supply.totalMinted + 1} / ${PUNK_SUPPLY_CONFIG.MAX_TOTAL_PUNKS}`
     }

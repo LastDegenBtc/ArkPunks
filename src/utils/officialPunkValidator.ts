@@ -9,11 +9,59 @@
  */
 
 import { SimplePool, type Event as NostrEvent } from 'nostr-tools'
-import { PUNK_SUPPLY_CONFIG } from '@/config/arkade'
+import { schnorr } from '@noble/curves/secp256k1'
+import { PUNK_SUPPLY_CONFIG, SERVER_SIGNING_CONFIG, getServerPubkey } from '@/config/arkade'
+import { sha256 } from '@noble/hashes/sha256'
+import { hexToBytes } from '@noble/hashes/utils'
 
 // Official relay - the authority for punk mints
 const OFFICIAL_RELAY = 'wss://relay.damus.io'
 const KIND_PUNK_MINT = 1400 // Mainnet launch event kind
+
+/**
+ * Verify a punk's server signature
+ * Returns true if the punk has a valid signature OR is in the legacy whitelist
+ */
+function verifyPunkSignature(punkId: string, signature?: string): boolean {
+  // Check legacy whitelist first (pre-signature punks)
+  if (SERVER_SIGNING_CONFIG.LEGACY_WHITELIST.includes(punkId)) {
+    console.log(`   ✅ Legacy whitelisted punk: ${punkId.slice(0, 8)}...`)
+    return true
+  }
+
+  // No signature = not official
+  if (!signature) {
+    return false
+  }
+
+  try {
+    const serverPubkey = getServerPubkey()
+
+    // If server pubkey not configured, fall back to legacy mode
+    if (!serverPubkey) {
+      console.warn('⚠️  Server pubkey not configured - using legacy whitelist only')
+      return false
+    }
+
+    // Verify schnorr signature
+    const messageHash = sha256(punkId)
+    const sigBytes = hexToBytes(signature)
+    const pubkeyBytes = hexToBytes(serverPubkey)
+
+    const isValid = schnorr.verify(sigBytes, messageHash, pubkeyBytes)
+
+    if (isValid) {
+      console.log(`   ✅ Valid server signature for punk: ${punkId.slice(0, 8)}...`)
+    } else {
+      console.log(`   ❌ Invalid signature for punk: ${punkId.slice(0, 8)}...`)
+    }
+
+    return isValid
+  } catch (error) {
+    console.error(`   ❌ Signature verification error for ${punkId.slice(0, 8)}:`, error)
+    return false
+  }
+}
 
 // Cache for official punks list
 let officialPunksCache: {
@@ -56,12 +104,24 @@ export async function getOfficialPunksList(): Promise<{
 
     console.log(`   Found ${events.length} punk events on authority relay`)
 
-    // Filter valid events (must have punk_id and vtxo tags)
+    // Filter valid events (must have punk_id, vtxo, AND valid signature)
     const validEvents = events.filter(event => {
       const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
       const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
-      return punkIdTag && vtxoTag
+      const signatureTag = event.tags.find(t => t[0] === 'server_sig')
+
+      if (!punkIdTag || !vtxoTag) {
+        return false
+      }
+
+      const punkId = punkIdTag[1]
+      const signature = signatureTag?.[1]
+
+      // Verify server signature or check legacy whitelist
+      return verifyPunkSignature(punkId, signature)
     })
+
+    console.log(`   Filtered to ${validEvents.length} punks with valid signatures (from ${events.length} total)`)
 
     // Sort by timestamp (earliest first)
     const sortedEvents = validEvents.sort((a, b) => a.created_at - b.created_at)

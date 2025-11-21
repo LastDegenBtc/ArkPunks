@@ -50,6 +50,33 @@ export const PUNK_SUPPLY_CONFIG = {
 }
 
 /**
+ * Server signing configuration
+ * The server signs each official punk mint to prevent forgery.
+ * Only punks with a valid server signature are considered official.
+ */
+export const SERVER_SIGNING_CONFIG = {
+  // Server's public key for verifying signatures
+  // This is hardcoded and publicly visible - it's safe to share
+  // The private key is kept secret on the server
+  SERVER_PUBKEY: 'efab2851167f159cd976ad9213fb8b9585dcf3b9549db7b668a46c32517239a3',
+
+  // Whitelist of punks minted before signature system was implemented
+  // These are considered official even without server signature
+  LEGACY_WHITELIST: [
+    '4315737c48d9f52eb87abcf5a14fa59d1be9a5c6c97ea8a926d18ef94e09c63a', // Your first punk
+    // Add other legitimate pre-signature punks here
+  ] as string[]
+}
+
+/**
+ * Get server public key from environment or config
+ */
+export function getServerPubkey(): string {
+  // @ts-ignore - Vite injects import.meta.env
+  return import.meta.env?.VITE_SERVER_PUBKEY || SERVER_SIGNING_CONFIG.SERVER_PUBKEY
+}
+
+/**
  * Local regtest configuration for development
  */
 export const REGTEST_CONFIG: ArkadeConfig = {
