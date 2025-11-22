@@ -1,7 +1,8 @@
 /**
  * Auto-Whitelist List API
  *
- * Returns the current auto-whitelist of punk IDs
+ * Returns the list of all whitelisted punk IDs.
+ * Used by the frontend to validate punks without server signatures.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -42,6 +43,8 @@ async function readWhitelist(): Promise<WhitelistStore> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('📋 Auto-whitelist list endpoint called')
+
   // Only allow GET
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -50,6 +53,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const store = await readWhitelist()
 
+    console.log(`✅ Returning ${store.entries.length} whitelisted punk(s)`)
+
     return res.status(200).json({
       punkIds: store.entries.map(e => e.punkId),
       count: store.entries.length,
@@ -57,10 +62,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
 
   } catch (error: any) {
-    console.error('❌ Error fetching whitelist:', error)
+    console.error('❌ Error reading whitelist:', error)
     return res.status(500).json({
-      error: 'Failed to fetch whitelist',
-      details: error.message
+      error: 'Failed to read whitelist',
+      details: error.message,
+      punkIds: []
     })
   }
 }
