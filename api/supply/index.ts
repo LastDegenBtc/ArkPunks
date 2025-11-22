@@ -39,6 +39,12 @@ async function fetchSupplyFromBlob(): Promise<SupplyCache | null> {
     console.log('📦 Fetching supply from Vercel Blob registry...')
 
     const { blobs } = await list()
+    console.log(`   Found ${blobs.length} blobs in storage`)
+    if (blobs.length > 0) {
+      console.log(`   Blob pathnames: ${blobs.map(b => b.pathname).join(', ')}`)
+    }
+    console.log(`   Looking for: "${BLOB_FILENAME}"`)
+
     const registryBlob = blobs.find(b => b.pathname === BLOB_FILENAME)
 
     if (!registryBlob) {
