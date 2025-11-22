@@ -454,7 +454,36 @@ const lightningEnabled = computed(() => {
   return import.meta.env.VITE_ENABLE_LIGHTNING === 'true'
 })
 
-// Calculate balance locked in punks
+/**
+ * Calculate balance locked in punks
+ *
+ * NEW ARCHITECTURE (Fixed orphaned punk issue):
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * Problem: VTXOs are mutable - they change through:
+ *   - Lightning swaps (sending/receiving via Boltz)
+ *   - Arkade rounds (server consolidation)
+ *   - Normal transfers
+ *
+ * Old approach (BROKEN):
+ *   - Stored vtxoOutpoint with each punk
+ *   - Tried to match punk outpoints with current wallet VTXOs
+ *   - Result: "Orphaned punks" when VTXO changed
+ *
+ * New approach (FIXED):
+ *   - Punk value = owned punks × 10,000 sats (simple count)
+ *   - vtxoOutpoint kept for historical tracking only (original mint TXID)
+ *   - No VTXO matching needed - works with any wallet operations
+ *
+ * Cryptographic proof layers (user's requirement):
+ *   1. Nostr event signature (signed by wallet's Nostr key)
+ *   2. Server signature (proves official mint)
+ *   3. Arkade wallet ↔ Nostr key binding (wallet identity IS Nostr key)
+ *   4. Balance requirement (wallet must have ≥ owned punks × 10k sats)
+ *
+ * This provides cryptographic proof beyond just Nostr, tied to the
+ * Arkade wallet, without relying on mutable VTXO outpoints.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ */
 const punkLockedBalance = computed(() => {
   try {
     const punksJson = localStorage.getItem('arkade_punks')
@@ -463,48 +492,17 @@ const punkLockedBalance = computed(() => {
     const punks = JSON.parse(punksJson)
     if (!Array.isArray(punks) || punks.length === 0) return 0n
 
-    console.log('🔍 DEBUG: Checking punk-locked balance')
-    console.log(`   Total punks in localStorage: ${punks.length}`)
+    // Filter punks owned by this wallet
+    const ownedPunks = punks.filter((punk: any) => punk.owner === walletAddress.value)
 
-    // Get current VTXO outpoints
-    const currentVtxoOutpoints = new Set(
-      vtxos.value.map(v => `${v.vtxo.outpoint.txid}:${v.vtxo.outpoint.vout}`)
-    )
-    console.log(`   Total VTXOs in wallet: ${vtxos.value.length}`)
-    console.log('   Current VTXO outpoints:', Array.from(currentVtxoOutpoints))
+    // Each punk represents 10,000 sats of locked value
+    const PUNK_VALUE = 10000n
+    const locked = BigInt(ownedPunks.length) * PUNK_VALUE
 
-    // Check each punk
-    let locked = 0n
-    let matchedCount = 0
-    let orphanedPunks: any[] = []
-
-    for (const punk of punks) {
-      const punkOutpoint = punk.vtxoOutpoint
-      const hasVtxo = currentVtxoOutpoints.has(punkOutpoint)
-
-      if (hasVtxo) {
-        // Find the VTXO and add its amount
-        const vtxo = vtxos.value.find(v =>
-          `${v.vtxo.outpoint.txid}:${v.vtxo.outpoint.vout}` === punkOutpoint
-        )
-        if (vtxo) {
-          locked += BigInt(vtxo.vtxo.amount)
-          matchedCount++
-          console.log(`   ✅ Punk #${punk.punkId}: MATCHED (${vtxo.vtxo.amount} sats)`)
-        }
-      } else {
-        orphanedPunks.push(punk)
-        console.log(`   ❌ Punk #${punk.punkId}: ORPHANED (VTXO ${punkOutpoint.slice(0, 16)}... not found)`)
-      }
-    }
-
-    console.log(`   Summary: ${matchedCount}/${punks.length} punks have VTXOs`)
+    console.log('🔍 Punk-locked balance calculation:')
+    console.log(`   Total punks owned: ${ownedPunks.length}`)
+    console.log(`   Value per punk: ${PUNK_VALUE} sats`)
     console.log(`   Locked balance: ${locked} sats`)
-
-    if (orphanedPunks.length > 0) {
-      console.warn(`   ⚠️ WARNING: ${orphanedPunks.length} punk(s) have no matching VTXO!`)
-      console.warn('   Orphaned punks:', orphanedPunks.map(p => `#${p.punkId}`).join(', '))
-    }
 
     return locked
   } catch (error) {
@@ -802,6 +800,16 @@ async function updateWalletInfo() {
     console.warn('⚠️ LARGE BALANCE DETECTED: ' + formatSats(balance.value.total) + ' sats')
     console.warn('⚠️ This might be test data from Arkade server or a promotional credit')
     console.warn('⚠️ If you did not expect this balance, it is coming from Arkade Protocol server')
+  }
+
+  // Validate: Check if user has enough balance to back their punks
+  if (punkLockedBalance.value > balance.value.total) {
+    const shortage = punkLockedBalance.value - balance.value.total
+    console.error('❌ INSUFFICIENT BALANCE FOR PUNKS!')
+    console.error(`   Punks require: ${formatSats(punkLockedBalance.value)} sats`)
+    console.error(`   Current balance: ${formatSats(balance.value.total)} sats`)
+    console.error(`   Shortage: ${formatSats(shortage)} sats`)
+    console.error(`   ⚠️ You may have lost punks due to spending their backing sats!`)
   }
 
   // Generate QR code when address is available

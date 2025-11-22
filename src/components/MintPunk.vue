@@ -458,6 +458,9 @@ async function mint() {
       .join('')
 
     // 4. Save punk to localStorage
+    // NOTE: vtxoOutpoint is kept for historical tracking (original mint TXID)
+    // but is NOT used for balance calculation (VTXOs change through rounds/swaps)
+    // Balance is calculated as: owned punks × 10,000 sats
     const mintEvent: MintEvent = {
       type: 'mint',
       punkId: generatedMetadata.punkId,
@@ -466,7 +469,7 @@ async function mint() {
         ...generatedMetadata,
         mintDate: new Date().toISOString()
       },
-      vtxoOutpoint: `${txid}:0`,
+      vtxoOutpoint: `${txid}:0`,  // Historical tracking only
       compressedData: compressedHex,
       timestamp: Date.now()
     }
