@@ -36,6 +36,7 @@ export interface ArkadeWalletInterface {
   arkadeAddress?: string // Arkade off-chain address (for transactions)
   boardingAddress?: string // Address to send funds for boarding
   pubkey: Uint8Array
+  sdkWallet?: any // Underlying Arkade SDK wallet instance (for Lightning swaps)
   getBalance: () => Promise<WalletBalance>
   getVtxos: () => Promise<VtxoInput[]>
   send: (recipient: string, amount: bigint, feeRate?: number) => Promise<string>
@@ -189,6 +190,7 @@ export async function createArkadeWallet(
       arkadeAddress,
       boardingAddress,
       pubkey: identity.publicKey,
+      sdkWallet: wallet, // Expose SDK wallet for Lightning swaps
       getBalance: async () => {
         console.log('🔍 Fetching balance...')
         console.log('   Wallet address:', address)

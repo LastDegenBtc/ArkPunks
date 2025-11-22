@@ -8,7 +8,7 @@
 
 import { BoltzSwapProvider, ArkadeLightning } from '@arkade-os/boltz-swap'
 import { RestArkProvider, RestIndexerProvider } from '@arkade-os/sdk'
-import type { ArkWallet } from '@arkade-os/sdk'
+import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
 import { getActiveConfig } from '@/config/arkade'
 
 const BOLTZ_API = 'https://api.ark.boltz.exchange'
@@ -17,7 +17,11 @@ const NETWORK = 'bitcoin' // mainnet
 /**
  * Initialize ArkadeLightning instance with wallet
  */
-function initArkadeLightning(wallet: ArkWallet): ArkadeLightning {
+function initArkadeLightning(walletInterface: ArkadeWalletInterface): ArkadeLightning {
+  if (!walletInterface.sdkWallet) {
+    throw new Error('SDK wallet not available')
+  }
+
   const config = getActiveConfig()
 
   const swapProvider = new BoltzSwapProvider({
@@ -34,7 +38,7 @@ function initArkadeLightning(wallet: ArkWallet): ArkadeLightning {
   })
 
   return new ArkadeLightning({
-    wallet,
+    wallet: walletInterface.sdkWallet,
     swapProvider,
     arkProvider,
     indexerProvider
@@ -44,12 +48,12 @@ function initArkadeLightning(wallet: ArkWallet): ArkadeLightning {
 /**
  * Create a Lightning invoice to receive funds into Arkade wallet
  *
- * @param wallet - Arkade wallet instance
+ * @param wallet - Arkade wallet interface
  * @param amountSats - Amount in satoshis to receive
  * @returns Invoice details including bolt11 string
  */
 export async function createReceiveInvoice(
-  wallet: ArkWallet,
+  wallet: ArkadeWalletInterface,
   amountSats: number
 ) {
   const arkadeLightning = initArkadeLightning(wallet)
@@ -77,12 +81,12 @@ export async function createReceiveInvoice(
 /**
  * Wait for payment and claim to Arkade wallet
  *
- * @param wallet - Arkade wallet instance
+ * @param wallet - Arkade wallet interface
  * @param pendingSwap - Pending swap object from createInvoice
  * @returns Transaction ID when claimed
  */
 export async function waitAndClaimPayment(
-  wallet: ArkWallet,
+  wallet: ArkadeWalletInterface,
   pendingSwap: any
 ): Promise<string> {
   const arkadeLightning = initArkadeLightning(wallet)
@@ -127,13 +131,13 @@ export async function decodeInvoice(bolt11: string) {
 /**
  * Pay a Lightning invoice from Arkade wallet
  *
- * @param wallet - Arkade wallet instance
+ * @param wallet - Arkade wallet interface
  * @param bolt11 - Lightning invoice to pay
  * @param maxFeeSats - Optional maximum fee tolerance in sats
  * @returns Payment result with preimage
  */
 export async function payLightningInvoice(
-  wallet: ArkWallet,
+  wallet: ArkadeWalletInterface,
   bolt11: string,
   maxFeeSats?: number
 ) {
@@ -165,7 +169,7 @@ export async function payLightningInvoice(
 /**
  * Get pending swaps from storage (if storage was initialized)
  */
-export async function getPendingSwaps(wallet: ArkWallet) {
+export async function getPendingSwaps(wallet: ArkadeWalletInterface) {
   const arkadeLightning = initArkadeLightning(wallet)
 
   try {
