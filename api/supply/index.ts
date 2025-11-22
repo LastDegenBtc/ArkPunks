@@ -1,114 +1,121 @@
 /**
- * Supply Cache API
+ * Supply API
  *
- * Returns the current punk supply from a server-side cache.
- * This ensures consistent counts across all clients and avoids
- * race conditions from concurrent Nostr relay queries.
+ * Returns the current punk supply from Vercel Blob registry.
+ * This is the single source of truth, independent of Nostr relay reliability.
  *
- * Cache is stored in-memory (serverless function stays warm for ~5 mins)
+ * Falls back to Nostr relay query only if blob registry is unavailable.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { list } from '@vercel/blob'
 import { SimplePool } from 'nostr-tools'
 
 const OFFICIAL_RELAY = 'wss://relay.damus.io'
 const KIND_PUNK_MINT = 1400
-const CACHE_DURATION_MS = 30000 // 30 seconds
+const BLOB_FILENAME = 'punk-registry.json'
+
+interface RegistryStore {
+  entries: Array<{ punkId: string }>
+  lastUpdated: number
+}
 
 interface SupplyCache {
   totalMinted: number
   maxPunks: number
   lastUpdated: number
-  updatedBy?: string // User agent that triggered the update
+  source: 'blob' | 'nostr'
 }
 
 // In-memory cache (persists while function is warm)
 let memoryCache: SupplyCache | null = null
+const CACHE_DURATION_MS = 30000 // 30 seconds
 
 /**
- * Fetch fresh supply from Nostr relay with retry logic
- * The relay sometimes returns incomplete results, so we:
- * - Query 5 times with 3-second delays between attempts
- * - Take the maximum count from all attempts
- * - Use no limit to get all events
+ * Read supply from Vercel Blob registry (primary source)
  */
-async function fetchSupplyFromRelay(userAgent?: string): Promise<SupplyCache> {
-  console.log('📡 Fetching fresh supply from Nostr relay...')
-  console.log(`   Triggered by: ${userAgent || 'unknown'}`)
+async function fetchSupplyFromBlob(): Promise<SupplyCache | null> {
+  try {
+    console.log('📦 Fetching supply from Vercel Blob registry...')
+
+    const { blobs } = await list()
+    const registryBlob = blobs.find(b => b.pathname === BLOB_FILENAME)
+
+    if (!registryBlob) {
+      console.log('   ⚠️  No registry blob found')
+      return null
+    }
+
+    const url = (registryBlob as any).downloadUrl || registryBlob.url
+    const response = await fetch(url)
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const text = await response.text()
+    const store: RegistryStore = JSON.parse(text)
+
+    console.log(`✅ Blob registry: ${store.entries.length} punks`)
+
+    return {
+      totalMinted: store.entries.length,
+      maxPunks: 1000,
+      lastUpdated: store.lastUpdated,
+      source: 'blob'
+    }
+  } catch (error) {
+    console.error('❌ Failed to read blob registry:', error)
+    return null
+  }
+}
+
+/**
+ * Fetch supply from Nostr relay (fallback only)
+ */
+async function fetchSupplyFromNostr(): Promise<SupplyCache> {
+  console.log('📡 Falling back to Nostr relay query...')
 
   const pool = new SimplePool()
-  const attempts = 5
-  const delayBetweenAttempts = 3000 // 3 seconds
-  let maxCount = 0
-  let bestPunkMap = new Map()
-  const attemptResults: number[] = []
 
   try {
-    // Query multiple times and take the maximum (relay is unreliable)
-    for (let i = 0; i < attempts; i++) {
-      // Add delay between attempts (except first one)
-      if (i > 0) {
-        console.log(`   ⏳ Waiting ${delayBetweenAttempts}ms before next attempt...`)
-        await new Promise(resolve => setTimeout(resolve, delayBetweenAttempts))
-      }
+    const allEvents = await pool.querySync([OFFICIAL_RELAY], {
+      kinds: [KIND_PUNK_MINT],
+      '#t': ['arkade-punk'],
+      limit: 2000
+    })
 
-      const allEvents = await pool.querySync([OFFICIAL_RELAY], {
-        kinds: [KIND_PUNK_MINT],
-        '#t': ['arkade-punk']
-        // No limit - get all events
-      })
+    console.log(`   Found ${allEvents.length} total events`)
 
-      console.log(`   Attempt ${i + 1}/${attempts}: Found ${allEvents.length} total events`)
+    // Filter by network AND server signature (only official punks)
+    const events = allEvents.filter(e => {
+      const networkTag = e.tags.find(t => t[0] === 'network')
+      const serverSigTag = e.tags.find(t => t[0] === 'server_sig')
+      return networkTag?.[1] === 'mainnet' && serverSigTag
+    })
 
-      // Filter by network AND server signature (only official punks)
-      const events = allEvents.filter(e => {
-        const networkTag = e.tags.find(t => t[0] === 'network')
-        const serverSigTag = e.tags.find(t => t[0] === 'server_sig')
-        return networkTag?.[1] === 'mainnet' && serverSigTag
-      })
+    // Deduplicate by punkId
+    const punkMap = new Map()
+    for (const event of events) {
+      const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
+      if (!punkIdTag) continue
 
-      console.log(`   Attempt ${i + 1}/${attempts}: ${events.length} events after filtering`)
+      const punkId = punkIdTag[1]
+      const existing = punkMap.get(punkId)
 
-      // Deduplicate by punkId (keep earliest)
-      const punkMap = new Map()
-      for (const event of events) {
-        const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
-        if (!punkIdTag) continue
-
-        const punkId = punkIdTag[1]
-        const existing = punkMap.get(punkId)
-
-        if (!existing || event.created_at < existing.created_at) {
-          punkMap.set(punkId, event)
-        }
-      }
-
-      const count = punkMap.size
-      attemptResults.push(count)
-      console.log(`   Attempt ${i + 1}/${attempts}: ${count} unique punks`)
-
-      // Keep the highest count
-      if (count > maxCount) {
-        maxCount = count
-        bestPunkMap = punkMap
-        console.log(`   🎯 New best: ${count} punks`)
-      }
-
-      // If we hit the max expected, no need to retry
-      if (count >= 1000) {
-        console.log(`   ✅ Hit max supply (1000), stopping early`)
-        break
+      if (!existing || event.created_at < existing.created_at) {
+        punkMap.set(punkId, event)
       }
     }
 
-    console.log(`📊 All attempts: ${attemptResults.join(', ')}`)
-    console.log(`✅ Best result: ${maxCount} unique punks`)
+    const count = punkMap.size
+    console.log(`✅ Nostr relay: ${count} unique punks`)
 
     return {
-      totalMinted: maxCount,
+      totalMinted: count,
       maxPunks: 1000,
       lastUpdated: Date.now(),
-      updatedBy: userAgent
+      source: 'nostr'
     }
   } finally {
     pool.close([OFFICIAL_RELAY])
@@ -123,34 +130,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const now = Date.now()
 
-    // Check if cache is fresh
+    // Check if in-memory cache is fresh
     if (memoryCache && (now - memoryCache.lastUpdated) < CACHE_DURATION_MS) {
       const age = Math.floor((now - memoryCache.lastUpdated) / 1000)
-      console.log(`✅ Serving cached supply (age: ${age}s)`)
+      console.log(`✅ Serving cached supply (age: ${age}s, source: ${memoryCache.source})`)
 
       return res.status(200).json({
         totalMinted: memoryCache.totalMinted,
         maxPunks: memoryCache.maxPunks,
         cached: true,
-        cacheAge: age
+        cacheAge: age,
+        source: memoryCache.source
       })
     }
 
     // Cache expired or doesn't exist - fetch fresh data
     console.log('🔄 Cache expired or missing, fetching fresh data...')
 
-    const freshSupply = await fetchSupplyFromRelay(req.headers['user-agent'])
+    // Try blob registry first (primary source of truth)
+    let freshSupply = await fetchSupplyFromBlob()
+
+    // Fall back to Nostr if blob unavailable
+    if (!freshSupply) {
+      console.log('⚠️  Blob registry unavailable, falling back to Nostr...')
+      freshSupply = await fetchSupplyFromNostr()
+    }
 
     // Update in-memory cache
     memoryCache = freshSupply
 
-    console.log(`✅ Cache updated: ${freshSupply.totalMinted} punks`)
+    console.log(`✅ Cache updated: ${freshSupply.totalMinted} punks (source: ${freshSupply.source})`)
 
     return res.status(200).json({
       totalMinted: freshSupply.totalMinted,
       maxPunks: freshSupply.maxPunks,
       cached: false,
-      cacheAge: 0
+      cacheAge: 0,
+      source: freshSupply.source
     })
 
   } catch (error: any) {

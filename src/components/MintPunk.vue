@@ -506,6 +506,31 @@ async function mint() {
       }
     }
 
+    // 6. Track punk in Vercel Blob registry (single source of truth)
+    console.log('📦 Registering punk in blob registry...')
+    try {
+      const pubkey = identity ? getPublicKey(identity.privateKey) : undefined
+      const registryResponse = await fetch('/api/registry/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          punkId: generatedMetadata.punkId,
+          pubkey,
+          vtxo: `${txid}:0`
+        })
+      })
+
+      if (registryResponse.ok) {
+        const registryData = await registryResponse.json()
+        console.log(`✅ Punk tracked in blob registry! Total: ${registryData.totalRegistered}`)
+      } else {
+        console.warn('⚠️ Failed to track punk in blob registry:', registryResponse.statusText)
+      }
+    } catch (error) {
+      console.error('❌ Error tracking punk in blob registry:', error)
+      // Continue anyway - punk is still minted
+    }
+
     // Register punk in local supply registry
     const registered = registerPunkMint(generatedMetadata.punkId, currentWallet.address)
     if (registered) {
