@@ -7,8 +7,9 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { SimplePool } from 'nostr-tools'
-import { createEscrowListing, getAllEscrowListings } from './_lib/escrowStore.js'
+import type { EscrowListing } from './_lib/escrowStore.js'
 import { getEscrowAddress } from './_lib/escrowWallet.js'
+import { put, list } from '@vercel/blob'
 
 const RELAYS = [
   'wss://relay.damus.io',
@@ -18,6 +19,57 @@ const RELAYS = [
 ]
 
 const KIND_PUNK_LISTING = 1401
+const BLOB_FILENAME = 'escrow-listings.json'
+
+interface EscrowStore {
+  listings: Record<string, EscrowListing>
+  lastUpdated: number
+}
+
+/**
+ * Read existing blob store (if it exists)
+ */
+async function readExistingStore(): Promise<EscrowStore> {
+  try {
+    const { blobs } = await list()
+    const storeBlob = blobs.find(b => b.pathname === BLOB_FILENAME)
+
+    if (!storeBlob) {
+      console.log('   No existing blob found, starting fresh')
+      return { listings: {}, lastUpdated: Date.now() }
+    }
+
+    const response = await fetch(storeBlob.url)
+    const text = await response.text()
+
+    // Check if we got HTML error page instead of JSON
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      console.warn('   Blob returned HTML instead of JSON, starting fresh')
+      return { listings: {}, lastUpdated: Date.now() }
+    }
+
+    const store: EscrowStore = JSON.parse(text)
+    console.log(`   Loaded existing blob with ${Object.keys(store.listings).length} listings`)
+    return store
+  } catch (error) {
+    console.warn('   Failed to read existing blob, starting fresh:', error)
+    return { listings: {}, lastUpdated: Date.now() }
+  }
+}
+
+/**
+ * Write complete store to blob
+ */
+async function writeCompleteStore(store: EscrowStore): Promise<void> {
+  store.lastUpdated = Date.now()
+  await put(BLOB_FILENAME, JSON.stringify(store, null, 2), {
+    access: 'public',
+    contentType: 'application/json',
+    addRandomSuffix: false,
+    allowOverwrite: true
+  })
+  console.log(`   ✅ Wrote blob with ${Object.keys(store.listings).length} listings`)
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('🔄 Escrow recovery started...')
@@ -26,6 +78,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Get current escrow address
     const escrowAddress = getEscrowAddress()
     console.log('   Escrow address:', escrowAddress)
+
+    // Read existing blob store
+    const store = await readExistingStore()
+    const existingPunkIds = new Set(Object.keys(store.listings))
 
     // Fetch all escrow-mode listings from Nostr
     const pool = new SimplePool()
@@ -53,11 +109,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`   Found ${escrowListings.length} escrow listings`)
 
-    // Get existing blob storage entries
-    const existingListings = await getAllEscrowListings()
-    const existingPunkIds = new Set(existingListings.map(l => l.punkId))
-    console.log(`   Existing blob entries: ${existingListings.length}`)
-
     // Group by punk ID and keep most recent
     const latestByPunk = new Map()
     for (const event of escrowListings) {
@@ -74,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`   Unique punks: ${latestByPunk.size}`)
 
-    // Recreate missing blob entries
+    // Build listings in memory
     let recovered = 0
     let skipped = 0
 
@@ -96,8 +147,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue
       }
 
-      // Create blob entry
-      await createEscrowListing({
+      // Add to in-memory store
+      store.listings[punkId] = {
         punkId,
         sellerPubkey: event.pubkey,
         sellerArkAddress: arkAddressTag[1],
@@ -106,11 +157,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         escrowAddress: escrowAddressTag?.[1] || escrowAddress,
         status: 'pending', // Will be updated when we detect deposits
         createdAt: event.created_at * 1000 // Convert to ms
-      })
+      }
 
       recovered++
-      console.log(`   ✅ Recovered: ${punkId.slice(0, 16)}... by ${event.pubkey.slice(0, 8)}...`)
+      if (recovered % 50 === 0) {
+        console.log(`   📝 Processed ${recovered} listings...`)
+      }
     }
+
+    // Write complete store to blob once
+    await writeCompleteStore(store)
 
     pool.close(RELAYS)
 
