@@ -782,6 +782,13 @@ async function updateWalletInfo() {
   console.log('   Available for minting:', formatSats(availableForMinting.value), 'sats')
   console.log('   Possible mints:', possibleMints.value)
 
+  // Debug: Detect suspiciously large balances (possible Arkade server test data)
+  if (balance.value.total >= 1_000_000n) {
+    console.warn('⚠️ LARGE BALANCE DETECTED: ' + formatSats(balance.value.total) + ' sats')
+    console.warn('⚠️ This might be test data from Arkade server or a promotional credit')
+    console.warn('⚠️ If you did not expect this balance, it is coming from Arkade Protocol server')
+  }
+
   // Generate QR code when address is available
   if (arkadeAddress.value && balance.value.total === 0n) {
     await nextTick()
