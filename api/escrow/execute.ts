@@ -130,19 +130,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Publish Nostr event transferring punk ownership from escrow to buyer
     console.log(`🔑 Publishing Nostr event: Transferring punk ${listing.punkId} to buyer...`)
-    const { publishPunkTransfer } = await import('../../src/utils/marketplaceUtils.js')
     const { ESCROW_PRIVATE_KEY, ESCROW_PUBKEY } = await import('./_lib/escrowStore.js')
 
     try {
-      // Transfer punk from escrow to buyer
-      // fromPubkey: escrow, toPubkey: buyer, txid: payment txid as reference
-      await publishPunkTransfer(
-        listing.punkId,
-        ESCROW_PUBKEY, // from escrow
-        listing.buyerPubkey!, // to buyer
-        paymentTxid, // reference payment txid
-        ESCROW_PRIVATE_KEY // escrow signs the transfer
-      )
+      // Import Nostr tools dynamically
+      const { SimplePool, finalizeEvent } = await import('nostr-tools')
+      const { hex } = await import('@scure/base')
+
+      const RELAYS = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://nostr.wine',
+        'wss://relay.snort.social'
+      ]
+      const KIND_PUNK_TRANSFER = 1403
+
+      // Determine network (default mainnet)
+      const currentNetwork = process.env.VITE_ARKADE_NETWORK || 'mainnet'
+
+      const eventTemplate = {
+        kind: KIND_PUNK_TRANSFER,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['t', 'arkade-punk-transfer'],
+          ['punk_id', listing.punkId],
+          ['from', ESCROW_PUBKEY],
+          ['to', listing.buyerPubkey!],
+          ['txid', paymentTxid],
+          ['network', currentNetwork]
+        ],
+        content: `Punk ${listing.punkId} transferred from escrow to ${listing.buyerPubkey!.slice(0, 8)}...`
+      }
+
+      const signedEvent = finalizeEvent(eventTemplate, hex.decode(ESCROW_PRIVATE_KEY))
+
+      const pool = new SimplePool()
+      await Promise.any(pool.publish(RELAYS, signedEvent))
+      pool.close(RELAYS)
+
       console.log(`✅ Punk ownership transferred to buyer via Nostr!`)
     } catch (nostrError: any) {
       console.error('⚠️ Failed to publish Nostr transfer event:', nostrError)
