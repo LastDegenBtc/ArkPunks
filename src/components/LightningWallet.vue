@@ -147,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, inject } from 'vue'
+import { ref, onMounted, watch, inject, nextTick } from 'vue'
 import QRCode from 'qrcode'
 import {
   createReceiveInvoice,
@@ -201,6 +201,9 @@ async function generateInvoice() {
     receiveInvoice.value = invoice
 
     console.log('✅ Invoice created:', invoice.bolt11)
+
+    // Wait for Vue to update DOM with the canvas element
+    await nextTick()
 
     // Generate QR code
     await generateQRCode(invoice.bolt11)
