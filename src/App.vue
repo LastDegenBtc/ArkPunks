@@ -26,6 +26,9 @@
           <button @click="currentView = 'faq'" :class="{ active: currentView === 'faq' }">
             FAQ
           </button>
+          <button @click="currentView = 'wallet'" :class="{ active: currentView === 'wallet' }">
+            ⚡ Wallet
+          </button>
         </nav>
       </div>
     </header>
@@ -93,6 +96,10 @@
         <div v-if="currentView === 'faq'" class="view">
           <FAQ />
         </div>
+
+        <div v-if="currentView === 'wallet'" class="view">
+          <LightningWallet />
+        </div>
       </div>
     </main>
 
@@ -118,6 +125,7 @@ import Marketplace from './components/Marketplace.vue'
 import Stats from './components/Stats.vue'
 import WalletConnect from './components/WalletConnect.vue'
 import FAQ from './components/FAQ.vue'
+import LightningWallet from './components/LightningWallet.vue'
 import { PunkState } from './types/punk'
 import { generatePunkMetadata } from './utils/generator'
 import type { ArkadeWalletInterface } from './utils/arkadeWallet'
@@ -152,7 +160,7 @@ const isMarketplaceAvailable = computed(() => {
   return now >= launchTime
 })
 
-const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'stats' | 'faq'>('gallery')
+const currentView = ref<'gallery' | 'mint' | 'marketplace' | 'stats' | 'faq' | 'wallet'>('gallery')
 const selectedPunk = ref<PunkState | null>(null)
 
 // Track which punks are currently listed
