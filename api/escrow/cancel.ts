@@ -49,9 +49,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const listing = await getEscrowListing(punkId)
 
     if (!listing) {
+      console.warn(`⚠️ No escrow listing found for punk ${punkId}`)
+      console.warn('   This punk may have been listed before escrow blob storage was implemented')
+      console.warn('   Or the listing was never properly created in blob storage')
+
       return res.status(404).json({
-        error: 'Listing not found',
-        punkId
+        error: 'Listing not found in escrow system',
+        punkId,
+        suggestion: 'This punk may need to be delisted from Nostr directly. Please contact support or relist the punk.'
       })
     }
 
