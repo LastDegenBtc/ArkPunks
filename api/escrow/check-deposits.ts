@@ -61,40 +61,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let matched = 0
     let unmatched = 0
 
-    for (const vtxo of vtxos) {
-      // Handle different possible VTXO structures
-      const vtxoData = vtxo.vtxo || vtxo
-      const outpoint = `${vtxoData.outpoint.txid}:${vtxoData.outpoint.vout}`
-      const amount = vtxoData.amount || 0
+    for (let i = 0; i < vtxos.length; i++) {
+      const vtxo = vtxos[i]
 
-      const listing = vtxoToListing.get(outpoint)
+      try {
+        // Handle different possible VTXO structures
+        const vtxoData = vtxo.vtxo || vtxo
 
-      if (listing) {
-        matched++
-        vtxoDetails.push({
-          outpoint,
-          amount,
-          status: 'matched',
-          punkId: listing.punkId,
-          sellerPubkey: listing.sellerPubkey,
-          sellerAddress: listing.sellerArkAddress,
-          listingPrice: listing.price,
-          listingStatus: listing.status,
-          listedAt: new Date(listing.createdAt).toISOString()
-        })
+        // Safety check
+        if (!vtxoData || !vtxoData.outpoint) {
+          console.error(`   ❌ VTXO ${i}: Missing outpoint data`)
+          console.error(`      VTXO structure:`, JSON.stringify(vtxo, null, 2))
+          continue
+        }
 
-        console.log(`   ✅ ${outpoint.slice(0, 16)}... → ${listing.sellerArkAddress.slice(0, 20)}...`)
-        console.log(`      Punk: ${listing.punkId.slice(0, 16)}... | Amount: ${amount} sats`)
-      } else {
-        unmatched++
-        vtxoDetails.push({
-          outpoint,
-          amount,
-          status: 'unmatched',
-          warning: 'No matching listing found in blob storage'
-        })
+        const outpoint = `${vtxoData.outpoint.txid}:${vtxoData.outpoint.vout}`
+        const amount = vtxoData.amount || 0
 
-        console.warn(`   ⚠️ ${outpoint.slice(0, 16)}... → NO MATCH (${amount} sats)`)
+        const listing = vtxoToListing.get(outpoint)
+
+        if (listing) {
+          matched++
+          vtxoDetails.push({
+            outpoint,
+            amount,
+            status: 'matched',
+            punkId: listing.punkId,
+            sellerPubkey: listing.sellerPubkey,
+            sellerAddress: listing.sellerArkAddress,
+            listingPrice: listing.price,
+            listingStatus: listing.status,
+            listedAt: new Date(listing.createdAt).toISOString()
+          })
+
+          console.log(`   ✅ ${outpoint.slice(0, 16)}... → ${listing.sellerArkAddress.slice(0, 20)}...`)
+          console.log(`      Punk: ${listing.punkId.slice(0, 16)}... | Amount: ${amount} sats`)
+        } else {
+          unmatched++
+          vtxoDetails.push({
+            outpoint,
+            amount,
+            status: 'unmatched',
+            warning: 'No matching listing found in blob storage'
+          })
+
+          console.warn(`   ⚠️ ${outpoint.slice(0, 16)}... → NO MATCH (${amount} sats)`)
+        }
+      } catch (error) {
+        console.error(`   ❌ Error processing VTXO ${i}:`, error)
+        console.error(`      VTXO data:`, JSON.stringify(vtxo, null, 2))
       }
     }
 
