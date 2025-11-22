@@ -61,7 +61,8 @@ async function writeRegistry(store: RegistryStore): Promise<void> {
     access: 'public',
     contentType: 'application/json',
     addRandomSuffix: false,
-    cacheControlMaxAge: 0  // No CDN caching - always fresh
+    cacheControlMaxAge: 0,  // No CDN caching - always fresh
+    allowOverwrite: true    // Allow updating existing blob
   })
 }
 

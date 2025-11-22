@@ -15,7 +15,8 @@
       "Bash(dir /b .vercel* 2)",
       "Bash(git merge:*)",
       "Bash(git pull:*)",
-      "Bash(node scripts/fetch-legacy-punks.js:*)"
+      "Bash(node scripts/fetch-legacy-punks.js:*)",
+      "Bash(node scripts/migrate-to-blob-registry.js:*)"
     ],
     "deny": [],
     "ask": []

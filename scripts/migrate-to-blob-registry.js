@@ -95,8 +95,9 @@ try {
         errorCount++
         const errorText = await response.text()
         errors.push({ punkId: punk.punkId.slice(0, 16), status: response.status, error: errorText })
-        if (errorCount <= 5) {
-          console.warn(`   ⚠️  Failed to register ${punk.punkId.slice(0, 16)}... (HTTP ${response.status})`)
+        if (errorCount <= 3) {
+          console.warn(`   ⚠️  Failed to register ${punk.punkId.slice(0, 16)}...`)
+          console.warn(`      HTTP ${response.status}: ${errorText.substring(0, 200)}`)
         }
       }
     } catch (error) {
