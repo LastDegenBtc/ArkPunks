@@ -135,6 +135,55 @@
             <p>After purchase, the punk will appear in your Gallery immediately.</p>
           </div>
         </div>
+
+        <div class="faq-item">
+          <button class="faq-question" @click="toggle('what-escrow')">
+            <span>What is the Escrow system?</span>
+            <span class="faq-icon">{{ isOpen('what-escrow') ? '−' : '+' }}</span>
+          </button>
+          <div v-if="isOpen('what-escrow')" class="faq-answer">
+            <p>ArkPunks uses an <strong>OpenSea-style escrow marketplace</strong> to ensure secure trading with zero risk for both buyers and sellers.</p>
+            <p><strong>How it works:</strong></p>
+            <ol>
+              <li><strong>Seller lists punk:</strong> The punk is transferred to the escrow wallet and marked as "For Sale"</li>
+              <li><strong>Buyer sends payment:</strong> Buyer pays the asking price + 1% fee to the escrow wallet</li>
+              <li><strong>Atomic swap:</strong> The escrow automatically transfers the punk to the buyer via Nostr and sends payment to the seller</li>
+            </ol>
+            <p><strong>Key benefits:</strong></p>
+            <ul>
+              <li><strong>Zero risk:</strong> Funds never go directly between buyer and seller</li>
+              <li><strong>Automated:</strong> Swap executes automatically when both deposits are confirmed</li>
+              <li><strong>Fast:</strong> Typically completes in 2-3 seconds</li>
+              <li><strong>Secure:</strong> Punk ownership transferred via signed Nostr events</li>
+            </ul>
+            <p>The escrow wallet is controlled by a server-side private key and operates on Bitcoin mainnet using the Arkade Protocol.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" @click="toggle('what-htlc')">
+            <span>What about P2P trading? (Coming Soon)</span>
+            <span class="faq-icon">{{ isOpen('what-htlc') ? '−' : '+' }}</span>
+          </button>
+          <div v-if="isOpen('what-htlc')" class="faq-answer">
+            <p><strong>🚀 Coming soon:</strong> Peer-to-peer trading using Hash Time-Locked Contracts (HTLCs)!</p>
+            <p><strong>HTLC advantages over escrow:</strong></p>
+            <ul>
+              <li><strong>Fully trustless:</strong> No escrow wallet needed, completely peer-to-peer</li>
+              <li><strong>Atomic swaps:</strong> Trade punks for Bitcoin with cryptographic guarantees</li>
+              <li><strong>No intermediary:</strong> Direct wallet-to-wallet trading</li>
+              <li><strong>Smart contract security:</strong> Either both parties get their assets, or both get refunded</li>
+            </ul>
+            <p><strong>How HTLCs work:</strong></p>
+            <ol>
+              <li>Buyer and seller agree on a price</li>
+              <li>Both parties create time-locked contracts with a shared secret hash</li>
+              <li>Once the secret is revealed, both transfers execute atomically</li>
+              <li>If anything fails, both parties get their funds back after the timeout</li>
+            </ol>
+            <p>HTLCs will enable completely decentralized trading while maintaining the same security guarantees as the escrow system. The marketplace will support both methods!</p>
+          </div>
+        </div>
       </div>
 
       <!-- Technical -->
