@@ -10,6 +10,7 @@ import { BoltzSwapProvider, ArkadeLightning } from '@arkade-os/boltz-swap'
 import { RestArkProvider, RestIndexerProvider } from '@arkade-os/sdk'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
 import { getActiveConfig } from '@/config/arkade'
+import * as bolt11 from 'light-bolt11-decoder'
 
 const BOLTZ_API = 'https://api.ark.boltz.exchange'
 const NETWORK = 'bitcoin' // mainnet
@@ -150,6 +151,49 @@ export async function getPendingSwaps(wallet: ArkadeWalletInterface) {
   } catch (error) {
     console.warn('Could not fetch pending swaps:', error)
     return []
+  }
+}
+
+/**
+ * Decode a Lightning invoice to extract amount and other details
+ *
+ * @param invoice - bolt11 invoice string
+ * @returns Invoice details including amount in sats
+ */
+export function decodeLightningInvoice(invoice: string): {
+  amountSats: number
+  description: string | null
+  expiry: number
+  paymentHash: string | null
+} {
+  try {
+    const decoded = bolt11.decode(invoice)
+
+    // Find amount section
+    const amountSection = decoded.sections.find((s: any) => s.name === 'amount')
+    const amountMillisats = amountSection ? parseInt(amountSection.value as string, 10) : 0
+    const amountSats = Math.floor(amountMillisats / 1000)
+
+    // Find description
+    const descSection = decoded.sections.find((s: any) => s.name === 'description')
+    const description = descSection ? (descSection.value as string) : null
+
+    // Find expiry
+    const expirySection = decoded.sections.find((s: any) => s.name === 'expiry')
+    const expiry = expirySection ? parseInt(expirySection.value as string, 10) : 3600
+
+    // Find payment hash
+    const hashSection = decoded.sections.find((s: any) => s.name === 'payment_hash')
+    const paymentHash = hashSection ? (hashSection.value as string) : null
+
+    return {
+      amountSats,
+      description,
+      expiry,
+      paymentHash
+    }
+  } catch (error: any) {
+    throw new Error(`Failed to decode Lightning invoice: ${error.message}`)
   }
 }
 

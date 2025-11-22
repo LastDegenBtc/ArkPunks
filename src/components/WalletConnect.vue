@@ -391,7 +391,8 @@ import {
   createReceiveInvoice,
   waitAndClaimPayment,
   payLightningInvoice,
-  estimateSwapFee
+  estimateSwapFee,
+  decodeLightningInvoice
 } from '@/utils/lightningSwaps'
 
 const config = getActiveConfig()
@@ -1077,6 +1078,29 @@ async function payLightningInvoiceNow() {
 
   try {
     console.log('💸 Paying Lightning invoice...')
+
+    // CRITICAL: Decode invoice to check amount
+    const invoiceData = decodeLightningInvoice(lightningSendInvoice.value.trim())
+    const invoiceAmountSats = invoiceData.amountSats
+
+    console.log(`📋 Invoice amount: ${invoiceAmountSats} sats`)
+    console.log(`💰 Available balance (excluding punks): ${availableForMinting.value} sats`)
+    console.log(`🎨 Punk-locked balance: ${punkLockedBalance.value} sats`)
+
+    // SECURITY: Check if trying to spend more than available (excluding punk VTXOs)
+    const estimatedFee = estimateSwapFee(invoiceAmountSats, 'send')
+    const totalNeeded = BigInt(invoiceAmountSats + estimatedFee)
+
+    if (totalNeeded > availableForMinting.value) {
+      const shortage = totalNeeded - availableForMinting.value
+      throw new Error(
+        `Insufficient available balance!\n\n` +
+        `You need ${invoiceAmountSats + estimatedFee} sats (${invoiceAmountSats} + ~${estimatedFee} fee)\n` +
+        `Available: ${availableForMinting.value} sats\n` +
+        `Locked in punks: ${punkLockedBalance.value} sats\n\n` +
+        `❌ Cannot spend punk-locked sats! You would lose your punks.`
+      )
+    }
 
     const result = await payLightningInvoice(wallet, lightningSendInvoice.value.trim())
     lightningSendResult.value = result
