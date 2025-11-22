@@ -7,7 +7,6 @@
  */
 
 import { ESCROW_PRIVATE_KEY, ESCROW_ADDRESS } from './escrowStore.js'
-import { hex } from '@scure/base'
 
 export interface EscrowWalletInterface {
   address: string
@@ -40,11 +39,8 @@ export async function getEscrowWallet(): Promise<EscrowWalletInterface> {
     const sdk = await import('@arkade-os/sdk')
     const { Wallet, SingleKey } = sdk
 
-    // Parse private key (hex string to Uint8Array)
-    const privateKeyBytes = hex.decode(ESCROW_PRIVATE_KEY)
-
-    // Create identity from private key
-    const identity = SingleKey.fromBytes(privateKeyBytes)
+    // Create identity from private key (hex string)
+    const identity = SingleKey.fromHex(ESCROW_PRIVATE_KEY)
 
     // Determine network config
     // Check env var first, then fallback to detecting from address
