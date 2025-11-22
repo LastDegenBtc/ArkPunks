@@ -473,12 +473,19 @@ async function mint() {
 
     const punksJson = localStorage.getItem('arkade_punks')
     const punks = punksJson ? JSON.parse(punksJson) : []
-    punks.push({
-      ...mintEvent.metadata,
-      owner: currentWallet.address,
-      vtxoOutpoint: `${txid}:0`
-    })
-    localStorage.setItem('arkade_punks', JSON.stringify(punks))
+
+    // Check if this punk already exists (deduplicate by punkId)
+    const existingPunkIndex = punks.findIndex((p: any) => p.punkId === generatedMetadata.punkId)
+    if (existingPunkIndex !== -1) {
+      console.warn(`⚠️ Punk ${generatedMetadata.punkId} already exists in localStorage, skipping duplicate`)
+    } else {
+      punks.push({
+        ...mintEvent.metadata,
+        owner: currentWallet.address,
+        vtxoOutpoint: `${txid}:0`
+      })
+      localStorage.setItem('arkade_punks', JSON.stringify(punks))
+    }
 
     // 5. Publish to Nostr relays
     console.log('📡 Publishing punk mint to Nostr...')

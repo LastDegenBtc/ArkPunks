@@ -243,7 +243,22 @@ async function loadPunks() {
         }
       }
 
-      allPunks.value = punks.map((data: any) => ({
+      // Deduplicate by punkId (in case there are duplicates in localStorage)
+      const uniquePunksMap = new Map()
+      for (const punk of punks) {
+        if (!uniquePunksMap.has(punk.punkId)) {
+          uniquePunksMap.set(punk.punkId, punk)
+        }
+      }
+      const uniquePunks = Array.from(uniquePunksMap.values())
+
+      // If we found duplicates, clean up localStorage
+      if (uniquePunks.length < punks.length) {
+        console.warn(`⚠️ Found ${punks.length - uniquePunks.length} duplicate punks in localStorage, cleaning up...`)
+        localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks))
+      }
+
+      allPunks.value = uniquePunks.map((data: any) => ({
         punkId: data.punkId,
         owner: data.owner || '', // Use owner from localStorage
         // Handle both formats: new (with metadata field) and old (metadata spread at root)
@@ -265,7 +280,22 @@ async function loadPunksFromLocalStorage() {
     if (punksJson) {
       const punks = JSON.parse(punksJson)
 
-      allPunks.value = punks.map((data: any) => ({
+      // Deduplicate by punkId (in case there are duplicates in localStorage)
+      const uniquePunksMap = new Map()
+      for (const punk of punks) {
+        if (!uniquePunksMap.has(punk.punkId)) {
+          uniquePunksMap.set(punk.punkId, punk)
+        }
+      }
+      const uniquePunks = Array.from(uniquePunksMap.values())
+
+      // If we found duplicates, clean up localStorage
+      if (uniquePunks.length < punks.length) {
+        console.warn(`⚠️ Found ${punks.length - uniquePunks.length} duplicate punks in localStorage (Nostr sync), cleaning up...`)
+        localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks))
+      }
+
+      allPunks.value = uniquePunks.map((data: any) => ({
         punkId: data.punkId,
         owner: data.owner || '', // Use owner from localStorage
         // Handle both formats: new (with metadata field) and old (metadata spread at root)
