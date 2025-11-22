@@ -27,24 +27,35 @@ let memoryCache: SupplyCache | null = null
 
 /**
  * Fetch fresh supply from Nostr relay with retry logic
- * The relay sometimes returns incomplete results, so we query 3 times and take the maximum
+ * The relay sometimes returns incomplete results, so we:
+ * - Query 5 times with 3-second delays between attempts
+ * - Take the maximum count from all attempts
+ * - Use no limit to get all events
  */
 async function fetchSupplyFromRelay(userAgent?: string): Promise<SupplyCache> {
   console.log('📡 Fetching fresh supply from Nostr relay...')
   console.log(`   Triggered by: ${userAgent || 'unknown'}`)
 
   const pool = new SimplePool()
-  const attempts = 3
+  const attempts = 5
+  const delayBetweenAttempts = 3000 // 3 seconds
   let maxCount = 0
   let bestPunkMap = new Map()
+  const attemptResults: number[] = []
 
   try {
     // Query multiple times and take the maximum (relay is unreliable)
     for (let i = 0; i < attempts; i++) {
+      // Add delay between attempts (except first one)
+      if (i > 0) {
+        console.log(`   ⏳ Waiting ${delayBetweenAttempts}ms before next attempt...`)
+        await new Promise(resolve => setTimeout(resolve, delayBetweenAttempts))
+      }
+
       const allEvents = await pool.querySync([OFFICIAL_RELAY], {
         kinds: [KIND_PUNK_MINT],
-        '#t': ['arkade-punk'],
-        limit: 2000 // Increased from 1100
+        '#t': ['arkade-punk']
+        // No limit - get all events
       })
 
       console.log(`   Attempt ${i + 1}/${attempts}: Found ${allEvents.length} total events`)
@@ -55,6 +66,8 @@ async function fetchSupplyFromRelay(userAgent?: string): Promise<SupplyCache> {
         const serverSigTag = e.tags.find(t => t[0] === 'server_sig')
         return networkTag?.[1] === 'mainnet' && serverSigTag
       })
+
+      console.log(`   Attempt ${i + 1}/${attempts}: ${events.length} events after filtering`)
 
       // Deduplicate by punkId (keep earliest)
       const punkMap = new Map()
@@ -71,19 +84,25 @@ async function fetchSupplyFromRelay(userAgent?: string): Promise<SupplyCache> {
       }
 
       const count = punkMap.size
-      console.log(`   Attempt ${i + 1}: ${count} unique punks`)
+      attemptResults.push(count)
+      console.log(`   Attempt ${i + 1}/${attempts}: ${count} unique punks`)
 
       // Keep the highest count
       if (count > maxCount) {
         maxCount = count
         bestPunkMap = punkMap
+        console.log(`   🎯 New best: ${count} punks`)
       }
 
       // If we hit the max expected, no need to retry
-      if (count >= 1000) break
+      if (count >= 1000) {
+        console.log(`   ✅ Hit max supply (1000), stopping early`)
+        break
+      }
     }
 
-    console.log(`✅ Best result: ${maxCount} unique punks (from ${attempts} attempts)`)
+    console.log(`📊 All attempts: ${attemptResults.join(', ')}`)
+    console.log(`✅ Best result: ${maxCount} unique punks`)
 
     return {
       totalMinted: maxCount,
