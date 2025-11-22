@@ -158,8 +158,8 @@
         </div>
       </div>
 
-      <!-- Lightning Swaps Section -->
-      <div class="lightning-section">
+      <!-- Lightning Swaps Section (hidden in production) -->
+      <div v-if="lightningEnabled" class="lightning-section">
         <h4 class="lightning-title">⚡ Lightning Swaps</h4>
         <div class="lightning-tabs">
           <button
@@ -447,6 +447,12 @@ const lightningSendError = ref('')
 let wallet: ArkadeWalletInterface | null = null
 
 const minVtxoValue = params.minVtxoValue
+
+// Lightning feature flag (disabled in production by default)
+const lightningEnabled = computed(() => {
+  // Only enable if explicitly set in environment
+  return import.meta.env.VITE_ENABLE_LIGHTNING === 'true'
+})
 
 // Calculate balance locked in punks
 const punkLockedBalance = computed(() => {
