@@ -18,14 +18,66 @@ import { hexToBytes } from '@noble/hashes/utils'
 const OFFICIAL_RELAY = 'wss://relay.damus.io'
 const KIND_PUNK_MINT = 1400 // Mainnet launch event kind
 
+// Auto-whitelist cache (fetched from API)
+let autoWhitelistCache: {
+  punkIds: Set<string>
+  lastFetch: number
+} | null = null
+
+const AUTO_WHITELIST_CACHE_DURATION = 60000 // 1 minute
+
+/**
+ * Fetch auto-whitelist from API
+ * These are punks submitted by users from the launch period
+ */
+async function getAutoWhitelist(): Promise<Set<string>> {
+  const now = Date.now()
+
+  // Return cache if fresh
+  if (autoWhitelistCache && (now - autoWhitelistCache.lastFetch) < AUTO_WHITELIST_CACHE_DURATION) {
+    return autoWhitelistCache.punkIds
+  }
+
+  try {
+    const response = await fetch('/api/whitelist/list')
+    if (!response.ok) {
+      console.warn('⚠️ Failed to fetch auto-whitelist from API')
+      return new Set()
+    }
+
+    const data = await response.json()
+    const punkIds = new Set<string>(data.punkIds || [])
+
+    console.log(`✅ Auto-whitelist loaded: ${punkIds.size} punk(s)`)
+
+    // Update cache
+    autoWhitelistCache = {
+      punkIds,
+      lastFetch: now
+    }
+
+    return punkIds
+  } catch (error) {
+    console.warn('⚠️ Failed to fetch auto-whitelist:', error)
+    return new Set()
+  }
+}
+
 /**
  * Verify a punk's server signature
- * Returns true if the punk has a valid signature OR is in the legacy whitelist
+ * Returns true if the punk has a valid signature OR is in the legacy/auto whitelist
  */
-function verifyPunkSignature(punkId: string, signature?: string, verbose: boolean = false): boolean {
+async function verifyPunkSignature(punkId: string, signature?: string, verbose: boolean = false): Promise<boolean> {
   // Check legacy whitelist first (pre-signature punks)
   if (SERVER_SIGNING_CONFIG.LEGACY_WHITELIST.includes(punkId)) {
     if (verbose) console.log(`   ✅ Legacy whitelisted punk: ${punkId.slice(0, 8)}...`)
+    return true
+  }
+
+  // Check auto-whitelist (launch period punks without Nostr events)
+  const autoWhitelist = await getAutoWhitelist()
+  if (autoWhitelist.has(punkId)) {
+    if (verbose) console.log(`   ✅ Auto-whitelisted punk: ${punkId.slice(0, 8)}...`)
     return true
   }
 
@@ -116,7 +168,10 @@ export async function getOfficialPunksList(): Promise<{
     let validSig = 0
 
     // Filter valid events (must have punk_id, vtxo, AND valid signature)
-    const validEvents = events.filter(event => {
+    // Using for loop instead of filter because verifyPunkSignature is async
+    const validEvents: NostrEvent[] = []
+
+    for (const event of events) {
       const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
       const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
       const signatureTag = event.tags.find(t => t[0] === 'server_sig')
@@ -126,18 +181,19 @@ export async function getOfficialPunksList(): Promise<{
       if (signatureTag) withServerSig++
 
       if (!punkIdTag || !vtxoTag) {
-        return false
+        continue
       }
 
       const punkId = punkIdTag[1]
       const signature = signatureTag?.[1]
 
-      // Verify server signature or check legacy whitelist
-      const isValid = verifyPunkSignature(punkId, signature)
-      if (isValid) validSig++
-
-      return isValid
-    })
+      // Verify server signature or check legacy/auto whitelist
+      const isValid = await verifyPunkSignature(punkId, signature)
+      if (isValid) {
+        validSig++
+        validEvents.push(event)
+      }
+    }
 
     console.log(`   📊 Filter stages:`)
     console.log(`      - Events with punk_id: ${withPunkId}/${events.length}`)

@@ -124,6 +124,7 @@ import type { ArkadeWalletInterface } from './utils/arkadeWallet'
 import { getOfficialPunksList } from './utils/officialPunkValidator'
 import { listPunkForSale, delistPunk, getMarketplaceListings, getSoldPunkIds, syncPunksFromNostr, publishPunkTransfer } from './utils/marketplaceUtils'
 import { compressPunkMetadata } from './utils/compression'
+import { autoSubmitLocalPunks } from './utils/autoWhitelist'
 import { hex } from '@scure/base'
 import { getPublicKey, nip19 } from 'nostr-tools'
 import { PUNK_SUPPLY_CONFIG, getActiveConfig } from './config/arkade'
@@ -892,6 +893,12 @@ onMounted(async () => {
   await loadOfficialPunks()
   await loadMarketplaceListings()
   await loadEscrowPubkey()
+
+  // Auto-submit local punks that aren't on Nostr to whitelist
+  // This runs in background and doesn't block the UI
+  autoSubmitLocalPunks().catch(err => {
+    console.warn('Auto-whitelist submission failed:', err)
+  })
 
   // Reload punks when switching wallets
   setInterval(() => {
