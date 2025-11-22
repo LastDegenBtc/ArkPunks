@@ -16,7 +16,9 @@
       "Bash(git merge:*)",
       "Bash(git pull:*)",
       "Bash(node scripts/fetch-legacy-punks.js:*)",
-      "Bash(node scripts/migrate-to-blob-registry.js:*)"
+      "Bash(node scripts/migrate-to-blob-registry.js:*)",
+      "Bash(curl:*)",
+      "Bash(node -e:*)"
     ],
     "deny": [],
     "ask": []

@@ -66,7 +66,7 @@ async function fetchSupplyFromBlob(): Promise<SupplyCache | null> {
 
     return {
       totalMinted: store.entries.length,
-      maxPunks: 1000,
+      maxPunks: 2016,
       lastUpdated: store.lastUpdated,
       source: 'blob'
     }
@@ -119,7 +119,7 @@ async function fetchSupplyFromNostr(): Promise<SupplyCache> {
 
     return {
       totalMinted: count,
-      maxPunks: 1000,
+      maxPunks: 2016,
       lastUpdated: Date.now(),
       source: 'nostr'
     }
@@ -182,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: 'Failed to fetch supply',
       details: error.message,
       totalMinted: 0,
-      maxPunks: 1000
+      maxPunks: 2016
     })
   }
 }

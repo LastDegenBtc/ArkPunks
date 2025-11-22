@@ -92,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       punkIds: store.entries.map(e => e.punkId),
       count: store.entries.length,
-      maxPunks: 1000,
+      maxPunks: 2016,
       lastUpdated: store.lastUpdated
     })
 

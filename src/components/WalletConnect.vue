@@ -92,38 +92,6 @@
           <h3>Wallet Details</h3>
         </div>
 
-      <!-- Funding guide for new wallets -->
-      <div v-if="balance.total === 0n" class="funding-guide">
-        <h4>💸 Fund Your Wallet</h4>
-        <p class="guide-intro">
-          Send Bitcoin instantly to your Arkade address from any Arkade wallet.<br/>
-          <strong>It's instant and free!</strong>
-        </p>
-
-        <div class="qr-section">
-          <div class="qr-code">
-            <canvas ref="qrCanvas"></canvas>
-          </div>
-          <div class="address-box">
-            <code>{{ arkadeAddress }}</code>
-            <button @click="copyArkadeAddress" class="btn-copy-inline">📋</button>
-          </div>
-        </div>
-
-        <div class="guide-tip">
-          <strong>💡 Don't have Bitcoin in Arkade yet?</strong><br/>
-          Use the official <a href="https://arkade.money" target="_blank" rel="noopener">Arkade Wallet</a> to:
-          <ul>
-            <li>🌐 On-ramp from on-chain Bitcoin</li>
-            <li>⚡ Fund via Lightning (Boltz plugin)</li>
-            <li>🚀 Instant, feeless transfers between Arkade wallets</li>
-          </ul>
-          <p class="guide-note">
-            Minimum: {{ formatSats(minVtxoValue) }} sats | Recommended: 20,000+ sats for multiple punks
-          </p>
-        </div>
-      </div>
-
       <div class="info-details">
         <div class="detail-row">
           <span class="label">Arkade Address:</span>
@@ -190,100 +158,131 @@
         </div>
       </div>
 
+      <!-- Lightning Swaps Section -->
+      <div class="lightning-section">
+        <h4 class="lightning-title">⚡ Lightning Swaps</h4>
+        <div class="lightning-tabs">
+          <button
+            @click="lightningTab = 'receive'"
+            :class="{ active: lightningTab === 'receive' }"
+            class="lightning-tab-button"
+          >
+            📥 Receive
+          </button>
+          <button
+            @click="lightningTab = 'send'"
+            :class="{ active: lightningTab === 'send' }"
+            class="lightning-tab-button"
+          >
+            📤 Send
+          </button>
+        </div>
+
+        <!-- Receive Tab -->
+        <div v-if="lightningTab === 'receive'" class="lightning-tab-content">
+          <div v-if="!lightningReceiveInvoice" class="lightning-form">
+            <div class="form-group">
+              <label>Amount (sats)</label>
+              <input
+                v-model.number="lightningReceiveAmount"
+                type="number"
+                placeholder="10000"
+                min="1000"
+                :disabled="lightningGenerating"
+                class="input-amount"
+              />
+              <p class="input-hint">
+                Est. fee: ~{{ estimateLightningFee(lightningReceiveAmount, 'receive') }} sats
+              </p>
+            </div>
+            <button
+              @click="generateLightningInvoice"
+              :disabled="lightningGenerating || !lightningReceiveAmount || lightningReceiveAmount < 1000"
+              class="btn btn-primary"
+            >
+              {{ lightningGenerating ? 'Generating...' : 'Generate Invoice' }}
+            </button>
+          </div>
+
+          <div v-else class="invoice-display">
+            <h4>✅ Invoice Generated</h4>
+            <p>Scan or copy to receive {{ lightningReceiveInvoice.amount }} sats</p>
+
+            <div class="qr-container">
+              <canvas ref="lightningQrCanvas" class="qr-code-lightning"></canvas>
+            </div>
+
+            <div class="invoice-string">
+              <code>{{ lightningReceiveInvoice.bolt11 }}</code>
+              <button @click="copyLightningInvoice" class="btn-copy-inline">
+                {{ lightningCopied ? '✓' : '📋' }}
+              </button>
+            </div>
+
+            <div class="status-box" :class="lightningPaymentStatus">
+              <p v-if="lightningPaymentStatus === 'waiting'">⏳ Waiting for payment...</p>
+              <p v-else-if="lightningPaymentStatus === 'completed'">🎉 Received! Funds added to wallet</p>
+              <p v-else-if="lightningPaymentStatus === 'error'">❌ {{ lightningErrorMessage }}</p>
+            </div>
+
+            <button @click="resetLightningReceive" class="btn btn-secondary">
+              Generate New Invoice
+            </button>
+          </div>
+        </div>
+
+        <!-- Send Tab -->
+        <div v-if="lightningTab === 'send'" class="lightning-tab-content">
+          <div class="lightning-form">
+            <div class="form-group">
+              <label>Lightning Invoice</label>
+              <textarea
+                v-model="lightningSendInvoice"
+                placeholder="lnbc..."
+                rows="3"
+                :disabled="lightningSending || !!lightningSendResult"
+                class="input-address"
+              ></textarea>
+            </div>
+
+            <button
+              v-if="!lightningSendResult"
+              @click="payLightningInvoiceNow"
+              :disabled="!lightningSendInvoice || lightningSending"
+              class="btn btn-primary"
+            >
+              {{ lightningSending ? 'Paying...' : 'Pay Invoice' }}
+            </button>
+
+            <div v-if="lightningSendResult" class="status-box success">
+              <p>✅ Payment sent successfully!</p>
+              <p><strong>Amount:</strong> {{ lightningSendResult.amount }} sats</p>
+              <p><small>Preimage: {{ lightningSendResult.preimage.slice(0, 16) }}...</small></p>
+            </div>
+
+            <div v-if="lightningSendError" class="status-box error">
+              <p>❌ {{ lightningSendError }}</p>
+            </div>
+
+            <button
+              v-if="lightningSendResult || lightningSendError"
+              @click="resetLightningSend"
+              class="btn btn-secondary"
+            >
+              Pay Another Invoice
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="wallet-actions">
         <button @click="refreshBalance" class="btn btn-secondary" :disabled="refreshing">
           {{ refreshing ? 'Refreshing...' : '🔄 Refresh' }}
         </button>
 
-        <button @click="forceSettle" class="btn btn-settle" :disabled="!wallet">
-          ℹ️ VTXO Status Info
-        </button>
-
-        <button @click="runDiagnostics" class="btn btn-diagnostic">
-          🔍 Nostr Diagnostic
-        </button>
-
         <button @click="exportWallet" class="btn btn-export">
           💾 Export Wallet
         </button>
-
-        <button @click="showSendModal = true" class="btn btn-send">
-          📤 Send Sats
-        </button>
-
-        <!-- Exit to L1 button hidden - users should not use this for now -->
-        <!-- <button @click="showExitModal = true" class="btn btn-exit-l1">
-          🟠 Exit to L1
-        </button> -->
-      </div>
-
-      <!-- Send Modal -->
-      <div v-if="showSendModal" class="modal-overlay" @click="showSendModal = false">
-        <div class="modal-content" @click.stop>
-          <div class="modal-header">
-            <h3>📤 Send Bitcoin (Off-chain)</h3>
-            <button @click="showSendModal = false" class="btn-close">×</button>
-          </div>
-
-          <div class="modal-body">
-            <div class="info-box">
-              <p>Send your available sats to any Arkade wallet address (ark...).</p>
-              <p><strong>Available to send:</strong> {{ formatSats(availableForMinting) }} sats</p>
-            </div>
-
-            <div class="send-input-group">
-              <label>
-                <strong>Recipient Arkade Address:</strong>
-                <input
-                  v-model="sendRecipientAddress"
-                  type="text"
-                  placeholder="ark..."
-                  class="input-address"
-                />
-              </label>
-              <p class="input-hint">
-                Enter the recipient's Arkade off-chain address (starts with "ark")
-              </p>
-            </div>
-
-            <div class="send-input-group">
-              <label>
-                <strong>Amount (sats):</strong>
-                <input
-                  v-model.number="sendAmount"
-                  type="number"
-                  min="1000"
-                  :max="Number(balance.available)"
-                  placeholder="10000"
-                  class="input-amount"
-                />
-              </label>
-              <p class="input-hint">
-                Minimum: 1,000 sats. You have {{ formatSats(balance.available) }} sats available.
-              </p>
-            </div>
-
-            <div v-if="sendStatus" class="send-status">
-              <p :class="sendSuccess ? 'status-success' : 'status-error'">
-                {{ sendStatus }}
-              </p>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button
-              @click="sendSats"
-              :disabled="!sendRecipientAddress || !sendAmount || sendAmount < 1000 || sending"
-              class="btn btn-primary"
-            >
-              {{ sending ? 'Sending...' : 'Send' }}
-            </button>
-
-            <button @click="showSendModal = false" class="btn btn-secondary">
-              Cancel
-            </button>
-          </div>
-        </div>
       </div>
 
       <!-- L1 Exit Modal -->
@@ -388,6 +387,12 @@ import { generatePunkImage } from '@/utils/generator'
 import { getPublicKey, nip19 } from 'nostr-tools'
 import { queryAllPunkMints, queryPunksByPubkey, queryPunksByAddress } from '@/utils/nostrDiagnostics'
 import { prepareL1Exit, getExitStatusMessage, type PunkExitInfo } from '@/utils/arkadeExit'
+import {
+  createReceiveInvoice,
+  waitAndClaimPayment,
+  payLightningInvoice,
+  estimateSwapFee
+} from '@/utils/lightningSwaps'
 
 const config = getActiveConfig()
 const params = getNetworkParams()
@@ -406,14 +411,6 @@ const expanded = ref(false) // Wallet details collapsed by default
 const showExitModal = ref(false)
 const exitL1Address = ref('')
 const preparingExit = ref(false)
-
-// Send modal state
-const showSendModal = ref(false)
-const sendRecipientAddress = ref('')
-const sendAmount = ref<number | null>(null)
-const sending = ref(false)
-const sendStatus = ref('')
-const sendSuccess = ref(false)
 const exitPreparationStatus = ref('')
 const exitPreparationSuccess = ref(false)
 
@@ -431,6 +428,20 @@ const balance = ref<WalletBalance>({
 })
 const vtxoCount = ref(0)
 const vtxos = ref<VtxoInput[]>([]) // Store VTXOs to calculate punk-locked balance
+
+// Lightning state
+const lightningTab = ref<'receive' | 'send'>('receive')
+const lightningReceiveAmount = ref<number>(10000)
+const lightningReceiveInvoice = ref<any>(null)
+const lightningGenerating = ref(false)
+const lightningPaymentStatus = ref<'waiting' | 'completed' | 'error'>('waiting')
+const lightningErrorMessage = ref('')
+const lightningQrCanvas = ref<HTMLCanvasElement | null>(null)
+const lightningCopied = ref(false)
+const lightningSendInvoice = ref('')
+const lightningSending = ref(false)
+const lightningSendResult = ref<any>(null)
+const lightningSendError = ref('')
 
 let wallet: ArkadeWalletInterface | null = null
 
@@ -679,41 +690,6 @@ async function refreshBalance() {
   }
 }
 
-/**
- * Force settlement of preconfirmed VTXOs
- *
- * IMPORTANT: VTXOs in "preconfirmed" state should automatically transition to "settled"
- * when the Arkade round completes on the server (typically 1-2 minutes).
- *
- * If they're stuck for longer, it indicates an issue with the Arkade round on the server side.
- * This function explains the situation and provides troubleshooting guidance.
- */
-async function forceSettle() {
-  if (!wallet) return
-
-  console.log('🔍 Checking VTXO states...')
-  console.log('   Available balance:', balance.value.available.toString(), 'sats')
-  console.log('   Recoverable balance:', balance.value.recoverable.toString(), 'sats')
-
-  // Show explanation and guidance
-  alert(
-    `⚠️ Understanding VTXO States\n\n` +
-    `Your VTXOs Status:\n` +
-    `• Available (spendable): ${balance.value.available.toString()} sats\n` +
-    `• Recoverable (waiting): ${balance.value.recoverable.toString()} sats\n\n` +
-    `How VTXOs Work:\n` +
-    `1. New VTXOs start in "preconfirmed" state\n` +
-    `2. They automatically become "settled" when the Arkade round completes\n` +
-    `3. This normally takes 1-2 minutes\n\n` +
-    `If Stuck for >10 Minutes:\n` +
-    `This indicates an Arkade server issue. The VTXOs will settle automatically once the server completes the round.\n\n` +
-    `What You Can Do:\n` +
-    `• Click "🔄 Refresh" periodically to check status\n` +
-    `• Wait for the Arkade round to complete\n` +
-    `• Be patient - the funds are safe and will settle automatically\n\n` +
-    `Note: There is no manual way to force VTXOs to settle - this happens automatically on the Arkade server when the round completes.`
-  )
-}
 
 async function generateQRCode(retryCount = 0) {
   console.log('🔍 Attempting to generate QR code... (attempt', retryCount + 1, ')')
@@ -840,47 +816,6 @@ async function copyNostrPubkey() {
   }
 }
 
-async function runDiagnostics() {
-  try {
-    console.log('🔍 Running Nostr diagnostics...')
-    console.log('━'.repeat(60))
-
-    // Get current identity
-    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    if (!privateKeyHex) {
-      console.error('❌ No private key found')
-      return
-    }
-
-    const pubkeyHex = getPublicKey(hex.decode(privateKeyHex))
-
-    console.log('📋 Your Identity:')
-    console.log('   Nostr pubkey (hex):', pubkeyHex)
-    console.log('   Nostr pubkey (npub):', nip19.npubEncode(pubkeyHex))
-    console.log('   Bitcoin address:', walletAddress.value)
-    console.log('')
-
-    // Query all punks on Nostr
-    const allPunks = await queryAllPunkMints()
-    console.log('')
-
-    if (allPunks.length > 0) {
-      // Query punks for this specific user
-      console.log('━'.repeat(60))
-      await queryPunksByPubkey(pubkeyHex)
-      console.log('')
-      await queryPunksByAddress(walletAddress.value)
-    }
-
-    console.log('━'.repeat(60))
-    console.log('✅ Diagnostic complete - check console output above')
-
-    alert(`🔍 Nostr Diagnostic Complete!\n\nFound ${allPunks.length} total punks on Nostr.\n\nCheck the browser console (F12) for detailed analysis.`)
-  } catch (error) {
-    console.error('❌ Diagnostic failed:', error)
-    alert('Diagnostic failed. Check console for details.')
-  }
-}
 
 async function copyBoardingAddress() {
   if (!boardingAddress.value) return
@@ -958,73 +893,6 @@ function exportWallet() {
   }
 }
 
-/**
- * Send sats to another Arkade wallet
- */
-async function sendSats() {
-  if (!wallet) {
-    sendStatus.value = 'Wallet not connected!'
-    sendSuccess.value = false
-    return
-  }
-
-  if (!sendRecipientAddress.value || !sendAmount.value) {
-    sendStatus.value = 'Please enter recipient address and amount'
-    sendSuccess.value = false
-    return
-  }
-
-  if (sendAmount.value < 1000) {
-    sendStatus.value = 'Minimum amount is 1,000 sats'
-    sendSuccess.value = false
-    return
-  }
-
-  if (BigInt(sendAmount.value) > balance.value.available) {
-    sendStatus.value = `Insufficient balance. You have ${formatSats(balance.value.available)} sats available.`
-    sendSuccess.value = false
-    return
-  }
-
-  sending.value = true
-  sendStatus.value = ''
-  sendSuccess.value = false
-
-  try {
-    console.log('📤 Sending sats...')
-    console.log('   Recipient:', sendRecipientAddress.value)
-    console.log('   Amount:', sendAmount.value, 'sats')
-
-    const txid = await wallet.send(
-      sendRecipientAddress.value,
-      BigInt(sendAmount.value)
-    )
-
-    console.log('✅ Send successful!')
-    console.log('   TX ID:', txid)
-
-    sendStatus.value = `✅ Sent ${sendAmount.value} sats successfully!\nTX ID: ${txid.slice(0, 16)}...`
-    sendSuccess.value = true
-
-    // Refresh balance
-    await refreshBalance()
-
-    // Reset form after 3 seconds
-    setTimeout(() => {
-      sendRecipientAddress.value = ''
-      sendAmount.value = null
-      sendStatus.value = ''
-      showSendModal.value = false
-    }, 3000)
-
-  } catch (error: any) {
-    console.error('❌ Send failed:', error)
-    sendStatus.value = `Failed to send: ${error?.message || error}`
-    sendSuccess.value = false
-  } finally {
-    sending.value = false
-  }
-}
 
 async function prepareExit() {
   preparingExit.value = true
@@ -1110,94 +978,131 @@ async function performActualExit() {
   }
 }
 
-async function performSend() {
-  if (!wallet || !sendRecipient.value || !sendAmount.value) return
 
-  sending.value = true
-  sendStatus.value = ''
-  sendSuccess.value = false
+// Lightning Functions
+async function generateLightningInvoice() {
+  if (!wallet) return
+
+  lightningGenerating.value = true
+  lightningErrorMessage.value = ''
 
   try {
-    console.log('📤 Sending funds...')
-    console.log('   Recipient:', sendRecipient.value)
-    console.log('   Amount:', sendAmount.value, 'sats')
+    console.log('📝 Creating Lightning invoice for', lightningReceiveAmount.value, 'sats')
 
-    // CRITICAL CHECK: Verify we have spendable VTXOs before attempting send
-    // The SDK will try to use ALL VTXOs including recoverable ones, so we need to block if only recoverable
-    console.log('🔍 Verifying spendable VTXOs before send...')
-    console.log('   Available balance:', balance.value.available.toString(), 'sats')
-    console.log('   Recoverable balance:', balance.value.recoverable.toString(), 'sats')
+    const invoice = await createReceiveInvoice(wallet, lightningReceiveAmount.value)
+    lightningReceiveInvoice.value = invoice
 
-    if (balance.value.available === 0n && balance.value.recoverable > 0n) {
-      sendStatus.value = `⏳ All VTXOs are recoverable - refresh and try again`
-      alert(
-        `⏳ All VTXOs are Recoverable\n\n` +
-        `You have ${balance.value.recoverable.toString()} sats in recoverable VTXOs.\n` +
-        `These cannot be spent yet.\n\n` +
-        `Click "🔄 Refresh" to check if they've become spendable.\n\n` +
-        `Recoverable VTXOs typically take 1-2 minutes to become spendable after receiving them.`
-      )
-      sending.value = false
-      return
-    }
+    console.log('✅ Invoice created:', invoice.bolt11)
 
-    // Confirm before sending
-    const confirmed = confirm(
-      `📤 Send Confirmation\n\n` +
-      `You are about to send ${sendAmount.value.toLocaleString()} sats to:\n` +
-      `${sendRecipient.value}\n\n` +
-      `This transaction is instant and has no fees.\n\n` +
-      `Continue?`
-    )
+    // Wait for Vue to update DOM with the canvas element
+    await nextTick()
 
-    if (!confirmed) {
-      sending.value = false
-      return
-    }
+    // Generate QR code
+    await generateLightningQRCode(invoice.bolt11)
 
-    // Send funds using Arkade wallet
-    console.log('✅ Proceeding with send - we have spendable balance')
-    const txid = await wallet.send(sendRecipient.value, BigInt(sendAmount.value))
-
-    sendStatus.value = `✅ Sent successfully! Transaction ID: ${txid.slice(0, 16)}...`
-    sendSuccess.value = true
-
-    console.log('✅ Send successful!')
-    console.log('   Transaction ID:', txid)
-
-    // Refresh balance after sending
-    await refreshBalance()
-
-    // Show success and close modal after delay
-    setTimeout(() => {
-      showSendModal.value = false
-      sendRecipient.value = ''
-      sendAmount.value = 0
-      sendStatus.value = ''
-    }, 3000)
+    // Start monitoring for payment
+    lightningPaymentStatus.value = 'waiting'
+    monitorLightningPayment(wallet, invoice.pendingSwap)
 
   } catch (error: any) {
-    console.error('❌ Send failed:', error)
-
-    // Check if it's a VTXO_RECOVERABLE error
-    if (error.message && error.message.includes('VTXO_RECOVERABLE')) {
-      sendStatus.value = `⏳ VTXOs not spendable. Click Refresh and try again.`
-
-      alert(
-        `⏳ VTXOs Not Spendable\n\n` +
-        `Some of your VTXOs are in "recoverable" state and cannot be spent yet.\n\n` +
-        `Click the "🔄 Refresh" button to update your spendable balance,\n` +
-        `then try sending again.\n\n` +
-        `Note: Recoverable VTXOs are shown separately in your wallet details.`
-      )
-    } else {
-      sendStatus.value = `❌ Send failed: ${error.message || error}`
-    }
-
-    sendSuccess.value = false
+    console.error('Failed to generate invoice:', error)
+    lightningErrorMessage.value = error.message
+    lightningPaymentStatus.value = 'error'
   } finally {
-    sending.value = false
+    lightningGenerating.value = false
   }
+}
+
+async function generateLightningQRCode(text: string) {
+  if (!lightningQrCanvas.value) return
+
+  try {
+    await QRCode.toCanvas(lightningQrCanvas.value, text.toUpperCase(), {
+      width: 200,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    })
+  } catch (error) {
+    console.error('Failed to generate Lightning QR code:', error)
+  }
+}
+
+async function monitorLightningPayment(walletInstance: any, pendingSwap: any) {
+  try {
+    console.log('⏳ Monitoring Lightning swap:', pendingSwap)
+
+    lightningPaymentStatus.value = 'waiting'
+
+    const txid = await waitAndClaimPayment(walletInstance, pendingSwap)
+
+    console.log('✅ Lightning payment claimed:', txid)
+    lightningPaymentStatus.value = 'completed'
+
+    // Refresh wallet balance
+    await refreshBalance()
+
+  } catch (error: any) {
+    console.error('Lightning payment monitoring failed:', error)
+    lightningErrorMessage.value = error.message
+    lightningPaymentStatus.value = 'error'
+  }
+}
+
+function copyLightningInvoice() {
+  if (!lightningReceiveInvoice.value) return
+
+  navigator.clipboard.writeText(lightningReceiveInvoice.value.bolt11)
+  lightningCopied.value = true
+  setTimeout(() => {
+    lightningCopied.value = false
+  }, 2000)
+}
+
+function resetLightningReceive() {
+  lightningReceiveInvoice.value = null
+  lightningPaymentStatus.value = 'waiting'
+  lightningErrorMessage.value = ''
+  lightningReceiveAmount.value = 10000
+}
+
+async function payLightningInvoiceNow() {
+  if (!wallet) return
+
+  lightningSending.value = true
+  lightningSendError.value = ''
+  lightningSendResult.value = null
+
+  try {
+    console.log('💸 Paying Lightning invoice...')
+
+    const result = await payLightningInvoice(wallet, lightningSendInvoice.value.trim())
+    lightningSendResult.value = result
+
+    console.log('✅ Payment sent:', result)
+
+    // Refresh wallet balance
+    await refreshBalance()
+
+  } catch (error: any) {
+    console.error('Failed to pay invoice:', error)
+    lightningSendError.value = error.message
+  } finally {
+    lightningSending.value = false
+  }
+}
+
+function resetLightningSend() {
+  lightningSendInvoice.value = ''
+  lightningSendResult.value = null
+  lightningSendError.value = ''
+}
+
+function estimateLightningFee(amount: number | undefined, direction: 'receive' | 'send'): number {
+  if (!amount) return 0
+  return estimateSwapFee(amount, direction)
 }
 
 // Watch for arkade address changes to generate QR code
@@ -2459,5 +2364,140 @@ h3 {
     padding: 12px 8px;
     font-size: 12px;
   }
+}
+
+/* Lightning Swaps Section */
+.lightning-section {
+  background: #1a1a1a;
+  border: 2px solid #f7931a;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.lightning-title {
+  color: #f7931a;
+  margin: 0 0 16px 0;
+  font-size: 18px;
+}
+
+.lightning-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #444;
+}
+
+.lightning-tab-button {
+  flex: 1;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #888;
+  transition: all 0.2s;
+}
+
+.lightning-tab-button:hover {
+  color: #fff;
+}
+
+.lightning-tab-button.active {
+  color: #f7931a;
+  border-bottom-color: #f7931a;
+}
+
+.lightning-tab-content {
+  padding-top: 10px;
+}
+
+.lightning-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qr-container {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.qr-code-lightning {
+  background: white;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.invoice-display {
+  text-align: center;
+}
+
+.invoice-display h4 {
+  color: #4ade80;
+  margin: 0 0 8px 0;
+}
+
+.invoice-display p {
+  color: #aaa;
+  margin: 0 0 16px 0;
+}
+
+.invoice-string {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  margin: 20px 0;
+}
+
+.invoice-string code {
+  flex: 1;
+  font-size: 11px;
+  word-break: break-all;
+  color: #f7931a;
+  font-family: monospace;
+}
+
+.status-box {
+  padding: 16px;
+  border-radius: 8px;
+  margin: 16px 0;
+  font-weight: 600;
+}
+
+.status-box.waiting {
+  background: #2a2416;
+  border: 2px solid #fbbf24;
+  color: #fbbf24;
+}
+
+.status-box.completed {
+  background: #1a2a1a;
+  border: 2px solid #4ade80;
+  color: #4ade80;
+}
+
+.status-box.error {
+  background: #2a1a1a;
+  border: 2px solid #ff6b35;
+  color: #ff6b35;
+}
+
+.status-box.success {
+  background: #1a2a1a;
+  border: 2px solid #4ade80;
+  color: #4ade80;
+}
+
+.status-box p {
+  margin: 8px 0;
 }
 </style>

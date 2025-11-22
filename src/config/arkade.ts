@@ -42,7 +42,7 @@ export const MAINNET_CONFIG: ArkadeConfig = {
  * To change the cap, update MAX_TOTAL_PUNKS below.
  */
 export const PUNK_SUPPLY_CONFIG = {
-  MAX_TOTAL_PUNKS: 1000, // Total collection size (change to 10000 if successful!)
+  MAX_TOTAL_PUNKS: 2016, // Total collection size - like Bitcoin's difficulty adjustment period
   LAUNCH_DATE: '2024-11-22T11:00:00.000Z', // 22 Nov 2024, 12:00 CET (11:00 UTC)
   MINT_ENABLED: true, // Launch has passed, minting is now enabled
   MAX_MINTS_PER_ADDRESS: 5, // Maximum mints per address per day

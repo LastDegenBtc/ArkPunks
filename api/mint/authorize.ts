@@ -19,7 +19,7 @@ import { bytesToHex } from '@noble/hashes/utils'
 const SERVER_PRIVATE_KEY = process.env.ARKPUNKS_SERVER_PRIVATE_KEY
 
 // Punk supply configuration
-const MAX_TOTAL_PUNKS = 1000
+const MAX_TOTAL_PUNKS = 2016
 const MAX_MINTS_PER_ADDRESS = 5
 const MINT_TIME_WINDOW = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
 
