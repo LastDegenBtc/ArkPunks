@@ -61,14 +61,19 @@ try {
   console.log('')
 
   // Submit to blob registry in batches
-  console.log('📤 Submitting punks to blob registry...')
+  // Use production URL (change this if running locally)
+  const API_URL = process.env.API_URL || 'https://arkpunks.com'
+
+  console.log(`📤 Submitting punks to blob registry at ${API_URL}...`)
+  console.log('')
 
   let successCount = 0
   let errorCount = 0
+  const errors = []
 
   for (const punk of uniquePunks) {
     try {
-      const response = await fetch('http://localhost:3000/api/registry/track', {
+      const response = await fetch(`${API_URL}/api/registry/track`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -88,12 +93,23 @@ try {
         }
       } else {
         errorCount++
-        console.warn(`   ⚠️  Failed to register ${punk.punkId.slice(0, 16)}...`)
+        const errorText = await response.text()
+        errors.push({ punkId: punk.punkId.slice(0, 16), status: response.status, error: errorText })
+        if (errorCount <= 5) {
+          console.warn(`   ⚠️  Failed to register ${punk.punkId.slice(0, 16)}... (HTTP ${response.status})`)
+        }
       }
     } catch (error) {
       errorCount++
-      console.error(`   ❌ Error registering punk:`, error.message)
+      errors.push({ punkId: punk.punkId.slice(0, 16), error: error.message })
+      if (errorCount <= 5) {
+        console.error(`   ❌ Error registering punk:`, error.message)
+      }
     }
+  }
+
+  if (errorCount > 5) {
+    console.log(`   ... and ${errorCount - 5} more errors`)
   }
 
   console.log('')
