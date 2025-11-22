@@ -22,10 +22,10 @@ const KIND_PUNK_MINT = 1400 // Mainnet launch event kind
  * Verify a punk's server signature
  * Returns true if the punk has a valid signature OR is in the legacy whitelist
  */
-function verifyPunkSignature(punkId: string, signature?: string): boolean {
+function verifyPunkSignature(punkId: string, signature?: string, verbose: boolean = false): boolean {
   // Check legacy whitelist first (pre-signature punks)
   if (SERVER_SIGNING_CONFIG.LEGACY_WHITELIST.includes(punkId)) {
-    console.log(`   ✅ Legacy whitelisted punk: ${punkId.slice(0, 8)}...`)
+    if (verbose) console.log(`   ✅ Legacy whitelisted punk: ${punkId.slice(0, 8)}...`)
     return true
   }
 
@@ -50,15 +50,17 @@ function verifyPunkSignature(punkId: string, signature?: string): boolean {
 
     const isValid = schnorr.verify(sigBytes, messageHash, pubkeyBytes)
 
-    if (isValid) {
-      console.log(`   ✅ Valid server signature for punk: ${punkId.slice(0, 8)}...`)
-    } else {
-      console.log(`   ❌ Invalid signature for punk: ${punkId.slice(0, 8)}...`)
+    if (verbose) {
+      if (isValid) {
+        console.log(`   ✅ Valid server signature for punk: ${punkId.slice(0, 8)}...`)
+      } else {
+        console.log(`   ❌ Invalid signature for punk: ${punkId.slice(0, 8)}...`)
+      }
     }
 
     return isValid
   } catch (error) {
-    console.error(`   ❌ Signature verification error for ${punkId.slice(0, 8)}:`, error)
+    if (verbose) console.error(`   ❌ Signature verification error for ${punkId.slice(0, 8)}:`, error)
     return false
   }
 }
@@ -84,11 +86,14 @@ export async function getOfficialPunksList(): Promise<{
 
   // Return cache if fresh
   if (officialPunksCache && (now - officialPunksCache.lastFetch) < CACHE_DURATION) {
+    console.log(`🔄 Using cached official punks (${officialPunksCache.punkIds.size} punks, age: ${Math.floor((now - officialPunksCache.lastFetch) / 1000)}s)`)
     return {
       punkIds: Array.from(officialPunksCache.punkIds),
       events: officialPunksCache.events
     }
   }
+
+  console.log('🆕 Cache expired or empty, fetching fresh data from relay...')
 
   const pool = new SimplePool()
 
@@ -104,11 +109,21 @@ export async function getOfficialPunksList(): Promise<{
 
     console.log(`   Found ${events.length} punk events on authority relay`)
 
+    // Debug: Count events at each filter stage
+    let withPunkId = 0
+    let withVtxo = 0
+    let withServerSig = 0
+    let validSig = 0
+
     // Filter valid events (must have punk_id, vtxo, AND valid signature)
     const validEvents = events.filter(event => {
       const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
       const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
       const signatureTag = event.tags.find(t => t[0] === 'server_sig')
+
+      if (punkIdTag) withPunkId++
+      if (vtxoTag) withVtxo++
+      if (signatureTag) withServerSig++
 
       if (!punkIdTag || !vtxoTag) {
         return false
@@ -118,10 +133,18 @@ export async function getOfficialPunksList(): Promise<{
       const signature = signatureTag?.[1]
 
       // Verify server signature or check legacy whitelist
-      return verifyPunkSignature(punkId, signature)
+      const isValid = verifyPunkSignature(punkId, signature)
+      if (isValid) validSig++
+
+      return isValid
     })
 
-    console.log(`   Filtered to ${validEvents.length} punks with valid signatures (from ${events.length} total)`)
+    console.log(`   📊 Filter stages:`)
+    console.log(`      - Events with punk_id: ${withPunkId}/${events.length}`)
+    console.log(`      - Events with vtxo: ${withVtxo}/${events.length}`)
+    console.log(`      - Events with server_sig: ${withServerSig}/${events.length}`)
+    console.log(`      - Events with valid signature: ${validSig}/${events.length}`)
+    console.log(`   ✅ Final valid events: ${validEvents.length}`)
 
     // Sort by timestamp (earliest first)
     const sortedEvents = validEvents.sort((a, b) => a.created_at - b.created_at)
@@ -151,6 +174,16 @@ export async function getOfficialPunksList(): Promise<{
 
     console.log(`✅ Loaded ${punkIds.length} official punks from authority relay`)
 
+    // Debug: Warn if we got zero official punks
+    if (punkIds.length === 0) {
+      console.warn('⚠️  WARNING: Zero official punks loaded! This will cause all official tags to disappear.')
+      console.warn('⚠️  Check:')
+      console.warn('⚠️    1. Are there punk events on the relay?')
+      console.warn('⚠️    2. Do they have server_sig tags?')
+      console.warn('⚠️    3. Is the server pubkey configured correctly?')
+      console.warn(`⚠️    Current server pubkey: ${getServerPubkey()}`)
+    }
+
     // Update cache
     officialPunksCache = {
       punkIds: new Set(punkIds),
@@ -162,8 +195,10 @@ export async function getOfficialPunksList(): Promise<{
 
   } catch (error) {
     console.error('❌ Failed to fetch official punks from relay:', error)
+    console.error('❌ Error details:', error instanceof Error ? error.message : String(error))
 
-    // Return empty list if fetch fails
+    // Return empty list if fetch fails (THIS WILL CAUSE OFFICIAL TAGS TO DISAPPEAR)
+    console.warn('⚠️  Returning empty official punks list due to error - all official tags will be hidden!')
     return { punkIds: [], events: [] }
   } finally {
     pool.close([OFFICIAL_RELAY])
