@@ -3,8 +3,22 @@
     <h2>Marketplace</h2>
     <p class="subtitle">List and browse ArkPunks</p>
 
+    <!-- Maintenance mode warning -->
+    <div v-if="isMaintenanceMode" class="marketplace-notice warning">
+      <strong>🔧 MARKETPLACE MAINTENANCE</strong>
+      <p>The escrow marketplace is temporarily under maintenance while we upgrade the system.</p>
+      <p><strong>Current Status:</strong></p>
+      <ul>
+        <li>✅ Viewing listings is still available</li>
+        <li>⚠️ New listings are disabled</li>
+        <li>⚠️ Buying is disabled</li>
+        <li>✅ Cancelling your listings is available</li>
+      </ul>
+      <p><em>We're testing a new system that removes VTXO dependencies. Thank you for your patience!</em></p>
+    </div>
+
     <!-- Marketplace features notice -->
-    <div class="marketplace-notice success">
+    <div v-if="!isMaintenanceMode" class="marketplace-notice success">
       <strong>🛡️ Escrow Mode Available!</strong> You can now list punks for sale using our secure escrow system.
       Sell your punks even while offline - the server handles everything automatically!
     </div>
@@ -74,16 +88,20 @@
             </div>
           </div>
 
-          <!-- Buy button (escrow mode) or disabled (P2P mode) -->
+          <!-- Buy button (escrow mode) or disabled (P2P mode/maintenance) -->
           <div v-if="!isOwnPunk(punk)">
             <button
-              v-if="punk.saleMode === 'escrow'"
+              v-if="punk.saleMode === 'escrow' && !isMaintenanceMode"
               @click="buyPunk(punk)"
               :disabled="buying || executing"
               class="btn btn-buy"
             >
               {{ buying ? '⏳ Buying...' : executing ? '⚡ Executing...' : '💰 Buy Now' }}
             </button>
+            <div v-else-if="isMaintenanceMode" class="buy-disabled-label">
+              <span>🔧 Maintenance</span>
+              <small>Buying temporarily disabled</small>
+            </div>
             <div v-else class="buy-disabled-label">
               <span>💱 P2P mode</span>
               <small>Coming soon</small>
@@ -151,6 +169,9 @@ import { getOfficialPunksList } from '@/utils/officialPunkValidator'
 import { buyPunkFromEscrow, executeEscrowSwap, cancelEscrowListing } from '@/utils/escrowApi'
 import { getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
+
+// Maintenance mode - set to true to enable maintenance banner
+const isMaintenanceMode = import.meta.env.VITE_MARKETPLACE_MAINTENANCE === 'true'
 
 const wallet = inject<() => ArkadeWalletInterface | null>('getWallet')
 const reloadPunks = inject<(() => Promise<void>) | undefined>('reloadPunks')
@@ -895,6 +916,30 @@ h2 {
   background: rgba(16, 185, 129, 0.1);
   border-color: #10b981;
   color: #10b981;
+}
+
+.marketplace-notice.warning {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+  text-align: left;
+}
+
+.marketplace-notice.warning ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.marketplace-notice.warning li {
+  margin: 6px 0;
+}
+
+.marketplace-notice.warning p {
+  margin: 8px 0;
+}
+
+.marketplace-notice.warning em {
+  color: #ff8888;
 }
 
 .marketplace-notice strong {
