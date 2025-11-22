@@ -463,16 +463,47 @@ const punkLockedBalance = computed(() => {
     const punks = JSON.parse(punksJson)
     if (!Array.isArray(punks) || punks.length === 0) return 0n
 
-    // Get punk VTXO outpoints
-    const punkOutpoints = new Set(punks.map((p: any) => p.vtxoOutpoint))
+    console.log('🔍 DEBUG: Checking punk-locked balance')
+    console.log(`   Total punks in localStorage: ${punks.length}`)
 
-    // Sum up amounts of VTXOs that belong to punks
+    // Get current VTXO outpoints
+    const currentVtxoOutpoints = new Set(
+      vtxos.value.map(v => `${v.vtxo.outpoint.txid}:${v.vtxo.outpoint.vout}`)
+    )
+    console.log(`   Total VTXOs in wallet: ${vtxos.value.length}`)
+    console.log('   Current VTXO outpoints:', Array.from(currentVtxoOutpoints))
+
+    // Check each punk
     let locked = 0n
-    for (const vtxo of vtxos.value) {
-      const outpoint = `${vtxo.vtxo.outpoint.txid}:${vtxo.vtxo.outpoint.vout}`
-      if (punkOutpoints.has(outpoint)) {
-        locked += BigInt(vtxo.vtxo.amount)
+    let matchedCount = 0
+    let orphanedPunks: any[] = []
+
+    for (const punk of punks) {
+      const punkOutpoint = punk.vtxoOutpoint
+      const hasVtxo = currentVtxoOutpoints.has(punkOutpoint)
+
+      if (hasVtxo) {
+        // Find the VTXO and add its amount
+        const vtxo = vtxos.value.find(v =>
+          `${v.vtxo.outpoint.txid}:${v.vtxo.outpoint.vout}` === punkOutpoint
+        )
+        if (vtxo) {
+          locked += BigInt(vtxo.vtxo.amount)
+          matchedCount++
+          console.log(`   ✅ Punk #${punk.punkId}: MATCHED (${vtxo.vtxo.amount} sats)`)
+        }
+      } else {
+        orphanedPunks.push(punk)
+        console.log(`   ❌ Punk #${punk.punkId}: ORPHANED (VTXO ${punkOutpoint.slice(0, 16)}... not found)`)
       }
+    }
+
+    console.log(`   Summary: ${matchedCount}/${punks.length} punks have VTXOs`)
+    console.log(`   Locked balance: ${locked} sats`)
+
+    if (orphanedPunks.length > 0) {
+      console.warn(`   ⚠️ WARNING: ${orphanedPunks.length} punk(s) have no matching VTXO!`)
+      console.warn('   Orphaned punks:', orphanedPunks.map(p => `#${p.punkId}`).join(', '))
     }
 
     return locked
