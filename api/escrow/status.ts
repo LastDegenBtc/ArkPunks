@@ -20,7 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // If punkId provided, return specific listing
     if (punkId && typeof punkId === 'string') {
-      const listing = getEscrowListing(punkId)
+      const listing = await getEscrowListing(punkId)
 
       if (!listing) {
         return res.status(404).json({ error: 'Listing not found' })
@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Otherwise, return all active listings
-    const listings = getAllEscrowListings()
+    const listings = await getAllEscrowListings()
 
     return res.status(200).json({
       success: true,

@@ -52,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const escrowAddress = getEscrowAddress()
 
     // Create escrow listing
-    createEscrowListing({
+    await createEscrowListing({
       punkId,
       sellerPubkey,
       sellerArkAddress,

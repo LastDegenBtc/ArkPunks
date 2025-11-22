@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Get escrow listing
-    const listing = getEscrowListing(punkId)
+    const listing = await getEscrowListing(punkId)
     if (!listing) {
       return res.status(404).json({ error: 'Punk not found in escrow' })
     }
@@ -118,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const paymentTxid = 'mock-payment-transfer-' + Date.now()
 
     // Update listing status
-    updateEscrowStatus(punkId, 'sold', {
+    await updateEscrowStatus(punkId, 'sold', {
       soldAt: Date.now(),
       punkTransferTxid: punkTxid,
       paymentTransferTxid: paymentTxid
