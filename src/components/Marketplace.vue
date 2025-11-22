@@ -90,8 +90,20 @@
             </div>
           </div>
 
-          <div v-else class="own-punk-label">
-            <span>🎨 Your punk</span>
+          <div v-else>
+            <!-- Cancel button for escrow listings -->
+            <button
+              v-if="punk.saleMode === 'escrow'"
+              @click="cancelListing(punk)"
+              :disabled="cancelling"
+              class="btn btn-cancel"
+            >
+              {{ cancelling ? '⏳ Cancelling...' : '🔴 Cancel Listing' }}
+            </button>
+            <!-- Own punk label for P2P listings -->
+            <div v-else class="own-punk-label">
+              <span>🎨 Your punk</span>
+            </div>
           </div>
         </div>
         </div>
@@ -136,7 +148,7 @@ import { ref, onMounted, inject, computed } from 'vue'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
 import { getMarketplaceListings, publishPunkSold } from '@/utils/marketplaceUtils'
 import { getOfficialPunksList } from '@/utils/officialPunkValidator'
-import { buyPunkFromEscrow, executeEscrowSwap } from '@/utils/escrowApi'
+import { buyPunkFromEscrow, executeEscrowSwap, cancelEscrowListing } from '@/utils/escrowApi'
 import { getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
 
@@ -160,6 +172,7 @@ const listedPunks = ref<MarketplaceListing[]>([])
 const loading = ref(true)
 const buying = ref(false)
 const executing = ref(false)
+const cancelling = ref(false)
 
 // Pagination
 const currentPage = ref(1)
@@ -506,6 +519,82 @@ async function buyPunk(punk: MarketplaceListing) {
   }
 }
 
+/**
+ * Cancel an escrow listing and return the punk to seller
+ */
+async function cancelListing(punk: MarketplaceListing) {
+  const currentWallet = wallet?.()
+  if (!currentWallet) {
+    alert('Please connect your wallet first!')
+    return
+  }
+
+  if (!isOwnPunk(punk)) {
+    alert('You can only cancel your own listings!')
+    return
+  }
+
+  if (punk.saleMode !== 'escrow') {
+    alert('Only escrow listings can be cancelled.')
+    return
+  }
+
+  const confirmed = confirm(
+    `Cancel listing for ${punk.metadata.name}?\n\n` +
+    `Your punk will be returned to your wallet.\n\n` +
+    `Continue?`
+  )
+
+  if (!confirmed) return
+
+  cancelling.value = true
+
+  try {
+    console.log('🔴 Cancelling escrow listing...')
+
+    // Get seller credentials
+    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
+    if (!privateKeyHex) {
+      throw new Error('Wallet private key not found')
+    }
+
+    const sellerPubkey = getPublicKey(hex.decode(privateKeyHex))
+    const sellerArkAddress = currentWallet.arkadeAddress
+
+    if (!sellerArkAddress) {
+      throw new Error('Arkade address not available')
+    }
+
+    // Cancel the listing
+    const response = await cancelEscrowListing({
+      punkId: punk.punkId,
+      sellerPubkey,
+      sellerArkAddress
+    })
+
+    console.log('✅ Listing cancelled:', response)
+
+    alert(
+      `✅ Listing cancelled!\n\n` +
+      `${response.message}\n\n` +
+      `${response.txid ? `Transfer TXID: ${response.txid.slice(0, 16)}...\n\n` : ''}` +
+      `Refresh the page to see your punk back in your gallery!`
+    )
+
+    // Reload listings and gallery
+    await loadListings()
+    if (reloadPunks) {
+      await reloadPunks()
+    }
+
+  } catch (error: any) {
+    console.error('❌ Failed to cancel listing:', error)
+    alert(`Cancellation failed:\n\n${error?.message || error}`)
+  } finally {
+    cancelling.value = false
+  }
+}
+
 onMounted(() => {
   loadListings()
 })
@@ -731,6 +820,15 @@ h2 {
 
 .btn-buy:hover:not(:disabled) {
   background: #059669;
+}
+
+.btn-cancel {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #dc2626;
 }
 
 .btn:disabled {
