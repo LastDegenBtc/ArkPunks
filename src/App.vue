@@ -63,6 +63,8 @@
                   v-if="!listedPunkIds.has(punk.punkId)"
                   @click="listPunk(punk)"
                   class="btn-action btn-list"
+                  :disabled="isMaintenanceMode"
+                  :title="isMaintenanceMode ? 'Marketplace is under maintenance' : 'List this punk for sale'"
                 >
                   💰 List for Sale
                 </button>
@@ -70,6 +72,8 @@
                   v-else
                   @click="delistPunkFromMarket(punk)"
                   class="btn-action btn-delist"
+                  :disabled="isMaintenanceMode"
+                  :title="isMaintenanceMode ? 'Marketplace is under maintenance' : 'Remove this punk from marketplace'"
                 >
                   🗑️ Delist
                 </button>
@@ -130,6 +134,9 @@ import { getPublicKey, nip19 } from 'nostr-tools'
 import { PUNK_SUPPLY_CONFIG, getActiveConfig } from './config/arkade'
 
 const walletConnectRef = ref<any>()
+
+// Maintenance mode - set to true to disable listing/delisting
+const isMaintenanceMode = import.meta.env.VITE_MARKETPLACE_MAINTENANCE === 'true'
 
 // Check if marketplace is available (only after launch in production)
 const isMarketplaceAvailable = computed(() => {
@@ -1104,6 +1111,17 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
+}
+
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+
+.btn-action:disabled:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .btn-list {
