@@ -92,38 +92,6 @@
           <h3>Wallet Details</h3>
         </div>
 
-      <!-- Funding guide for new wallets -->
-      <div v-if="balance.total === 0n" class="funding-guide">
-        <h4>💸 Fund Your Wallet</h4>
-        <p class="guide-intro">
-          Send Bitcoin instantly to your Arkade address from any Arkade wallet.<br/>
-          <strong>It's instant and free!</strong>
-        </p>
-
-        <div class="qr-section">
-          <div class="qr-code">
-            <canvas ref="qrCanvas"></canvas>
-          </div>
-          <div class="address-box">
-            <code>{{ arkadeAddress }}</code>
-            <button @click="copyArkadeAddress" class="btn-copy-inline">📋</button>
-          </div>
-        </div>
-
-        <div class="guide-tip">
-          <strong>💡 Don't have Bitcoin in Arkade yet?</strong><br/>
-          Use the official <a href="https://arkade.money" target="_blank" rel="noopener">Arkade Wallet</a> to:
-          <ul>
-            <li>🌐 On-ramp from on-chain Bitcoin</li>
-            <li>⚡ Fund via Lightning (Boltz plugin)</li>
-            <li>🚀 Instant, feeless transfers between Arkade wallets</li>
-          </ul>
-          <p class="guide-note">
-            Minimum: {{ formatSats(minVtxoValue) }} sats | Recommended: 20,000+ sats for multiple punks
-          </p>
-        </div>
-      </div>
-
       <div class="info-details">
         <div class="detail-row">
           <span class="label">Arkade Address:</span>
