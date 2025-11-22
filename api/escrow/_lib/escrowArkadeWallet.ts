@@ -6,7 +6,7 @@
  * - Executing atomic swaps (transferring punk to buyer, payment to seller)
  */
 
-import { ESCROW_PRIVATE_KEY } from './escrowStore.js'
+import { ESCROW_PRIVATE_KEY, ESCROW_ADDRESS } from './escrowStore.js'
 import { hex } from '@scure/base'
 
 export interface EscrowWalletInterface {
