@@ -9,7 +9,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { SimplePool, finalizeEvent, type EventTemplate } from 'nostr-tools'
 import { hex } from '@scure/base'
 import { put } from '@vercel/blob'
-import { ESCROW_PRIVATE_KEY, ESCROW_PUBKEY } from './_lib/escrowStore.js'
+import { ESCROW_PRIVATE_KEY, ESCROW_PUBKEY, ESCROW_ADDRESS } from './_lib/escrowStore.js'
 
 const RELAYS = [
   'wss://relay.damus.io',
@@ -33,18 +33,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Fetch all existing escrow listings from Nostr
+    // Query by escrow_address tag to find listings pointing to this escrow
     const pool = new SimplePool()
     const currentNetwork = 'mainnet'
 
     console.log('   Fetching escrow listings from Nostr...')
+    console.log('   Querying for escrow_address:', ESCROW_ADDRESS)
 
     const allListingEvents = await pool.querySync(RELAYS, {
       kinds: [KIND_PUNK_LISTING],
-      authors: [ESCROW_PUBKEY],
+      '#escrow_address': [ESCROW_ADDRESS],
       limit: 1000
     })
 
-    console.log(`   Found ${allListingEvents.length} escrow listing events`)
+    console.log(`   Found ${allListingEvents.length} listing events for this escrow`)
 
     // Filter for active escrow listings
     const escrowListings = allListingEvents.filter(e => {
