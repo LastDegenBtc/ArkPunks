@@ -13,6 +13,7 @@ export interface EscrowWalletInterface {
   arkadeAddress: string
   send: (recipient: string, amount: bigint) => Promise<string>
   getBalance: () => Promise<{ available: bigint; total: bigint }>
+  getVtxos: () => Promise<any[]>
 }
 
 let cachedWallet: EscrowWalletInterface | null = null
@@ -110,6 +111,13 @@ export async function getEscrowWallet(): Promise<EscrowWalletInterface> {
           available: toBigInt(balance.available),
           total: toBigInt(balance.total)
         }
+      },
+
+      getVtxos: async () => {
+        console.log('📋 Fetching VTXOs from escrow wallet...')
+        const vtxos = await walletAny.getVtxos()
+        console.log(`   Found ${vtxos.length} VTXOs`)
+        return vtxos
       }
     }
 

@@ -3,8 +3,22 @@
     <h2>Marketplace</h2>
     <p class="subtitle">List and browse ArkPunks</p>
 
+    <!-- Maintenance mode warning -->
+    <div v-if="isMaintenanceMode" class="marketplace-notice warning">
+      <strong>🔧 MARKETPLACE MAINTENANCE</strong>
+      <p>The escrow marketplace is temporarily under maintenance while we upgrade the system.</p>
+      <p><strong>Current Status:</strong></p>
+      <ul>
+        <li>✅ Viewing listings is still available</li>
+        <li>⚠️ New listings are disabled</li>
+        <li>⚠️ Buying is disabled</li>
+        <li>✅ Cancelling your listings is available</li>
+      </ul>
+      <p><em>We're testing a new system that removes VTXO dependencies. Thank you for your patience!</em></p>
+    </div>
+
     <!-- Marketplace features notice -->
-    <div class="marketplace-notice success">
+    <div v-if="!isMaintenanceMode" class="marketplace-notice success">
       <strong>🛡️ Escrow Mode Available!</strong> You can now list punks for sale using our secure escrow system.
       Sell your punks even while offline - the server handles everything automatically!
     </div>
@@ -74,24 +88,40 @@
             </div>
           </div>
 
-          <!-- Buy button (escrow mode) or disabled (P2P mode) -->
+          <!-- Buy button (escrow mode) or disabled (P2P mode/maintenance) -->
           <div v-if="!isOwnPunk(punk)">
             <button
-              v-if="punk.saleMode === 'escrow'"
+              v-if="punk.saleMode === 'escrow' && !isMaintenanceMode"
               @click="buyPunk(punk)"
               :disabled="buying || executing"
               class="btn btn-buy"
             >
               {{ buying ? '⏳ Buying...' : executing ? '⚡ Executing...' : '💰 Buy Now' }}
             </button>
+            <div v-else-if="isMaintenanceMode" class="buy-disabled-label">
+              <span>🔧 Maintenance</span>
+              <small>Buying temporarily disabled</small>
+            </div>
             <div v-else class="buy-disabled-label">
               <span>💱 P2P mode</span>
               <small>Coming soon</small>
             </div>
           </div>
 
-          <div v-else class="own-punk-label">
-            <span>🎨 Your punk</span>
+          <div v-else>
+            <!-- Cancel button for escrow listings -->
+            <button
+              v-if="punk.saleMode === 'escrow'"
+              @click="cancelListing(punk)"
+              :disabled="cancelling"
+              class="btn btn-cancel"
+            >
+              {{ cancelling ? '⏳ Cancelling...' : '🔴 Cancel Listing' }}
+            </button>
+            <!-- Own punk label for P2P listings -->
+            <div v-else class="own-punk-label">
+              <span>🎨 Your punk</span>
+            </div>
           </div>
         </div>
         </div>
@@ -134,11 +164,14 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, computed } from 'vue'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
-import { getMarketplaceListings, publishPunkSold } from '@/utils/marketplaceUtils'
+import { getMarketplaceListings, publishPunkSold, delistPunk } from '@/utils/marketplaceUtils'
 import { getOfficialPunksList } from '@/utils/officialPunkValidator'
-import { buyPunkFromEscrow, executeEscrowSwap } from '@/utils/escrowApi'
+import { buyPunkFromEscrow, executeEscrowSwap, cancelEscrowListing } from '@/utils/escrowApi'
 import { getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
+
+// Maintenance mode - set to true to enable maintenance banner
+const isMaintenanceMode = import.meta.env.VITE_MARKETPLACE_MAINTENANCE === 'true'
 
 const wallet = inject<() => ArkadeWalletInterface | null>('getWallet')
 const reloadPunks = inject<(() => Promise<void>) | undefined>('reloadPunks')
@@ -160,6 +193,7 @@ const listedPunks = ref<MarketplaceListing[]>([])
 const loading = ref(true)
 const buying = ref(false)
 const executing = ref(false)
+const cancelling = ref(false)
 
 // Pagination
 const currentPage = ref(1)
@@ -506,6 +540,116 @@ async function buyPunk(punk: MarketplaceListing) {
   }
 }
 
+/**
+ * Cancel an escrow listing and return the punk to seller
+ */
+async function cancelListing(punk: MarketplaceListing) {
+  const currentWallet = wallet?.()
+  if (!currentWallet) {
+    alert('Please connect your wallet first!')
+    return
+  }
+
+  if (!isOwnPunk(punk)) {
+    alert('You can only cancel your own listings!')
+    return
+  }
+
+  if (punk.saleMode !== 'escrow') {
+    alert('Only escrow listings can be cancelled.')
+    return
+  }
+
+  const confirmed = confirm(
+    `Cancel listing for ${punk.metadata.name}?\n\n` +
+    `Your punk will be returned to your wallet.\n\n` +
+    `Continue?`
+  )
+
+  if (!confirmed) return
+
+  cancelling.value = true
+
+  try {
+    console.log('🔴 Cancelling escrow listing...')
+
+    // Get seller credentials
+    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
+    if (!privateKeyHex) {
+      throw new Error('Wallet private key not found')
+    }
+
+    const sellerPubkey = getPublicKey(hex.decode(privateKeyHex))
+    const sellerArkAddress = currentWallet.arkadeAddress
+
+    if (!sellerArkAddress) {
+      throw new Error('Arkade address not available')
+    }
+
+    // Cancel the listing
+    const response = await cancelEscrowListing({
+      punkId: punk.punkId,
+      sellerPubkey,
+      sellerArkAddress
+    })
+
+    console.log('✅ Listing cancelled:', response)
+
+    alert(
+      `✅ Listing cancelled!\n\n` +
+      `${response.message}\n\n` +
+      `${response.txid ? `Transfer TXID: ${response.txid.slice(0, 16)}...\n\n` : ''}` +
+      `Refresh the page to see your punk back in your gallery!`
+    )
+
+    // Reload listings and gallery
+    await loadListings()
+    if (reloadPunks) {
+      await reloadPunks()
+    }
+
+  } catch (error: any) {
+    console.error('❌ Failed to cancel listing:', error)
+
+    // If listing not found in escrow, offer to delist from Nostr
+    if (error?.message?.includes('Listing not found')) {
+      const delistConfirm = confirm(
+        `Escrow listing not found in system.\n\n` +
+        `This can happen if the listing wasn't properly saved.\n\n` +
+        `Would you like to delist this punk from Nostr?\n` +
+        `This will remove it from the marketplace.`
+      )
+
+      if (delistConfirm) {
+        try {
+          const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
+          if (!privateKeyHex) throw new Error('Wallet private key not found')
+
+          console.log('📤 Delisting punk from Nostr...')
+          await delistPunk(punk.punkId, privateKeyHex)
+
+          alert(
+            `✅ Punk delisted from Nostr!\n\n` +
+            `The punk should disappear from the marketplace shortly.\n\n` +
+            `Refresh the page to see the change.`
+          )
+
+          await loadListings()
+          if (reloadPunks) await reloadPunks()
+
+        } catch (delistError: any) {
+          console.error('❌ Failed to delist from Nostr:', delistError)
+          alert(`Failed to delist:\n\n${delistError?.message || delistError}`)
+        }
+      }
+    } else {
+      alert(`Cancellation failed:\n\n${error?.message || error}`)
+    }
+  } finally {
+    cancelling.value = false
+  }
+}
+
 onMounted(() => {
   loadListings()
 })
@@ -733,6 +877,15 @@ h2 {
   background: #059669;
 }
 
+.btn-cancel {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #dc2626;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -763,6 +916,30 @@ h2 {
   background: rgba(16, 185, 129, 0.1);
   border-color: #10b981;
   color: #10b981;
+}
+
+.marketplace-notice.warning {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+  text-align: left;
+}
+
+.marketplace-notice.warning ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.marketplace-notice.warning li {
+  margin: 6px 0;
+}
+
+.marketplace-notice.warning p {
+  margin: 8px 0;
+}
+
+.marketplace-notice.warning em {
+  color: #ff8888;
 }
 
 .marketplace-notice strong {

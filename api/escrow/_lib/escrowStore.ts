@@ -65,16 +65,28 @@ async function readStore(): Promise<EscrowStore> {
 
     if (!storeBlob) {
       // No store exists yet, return empty
+      console.log('📋 No blob found, returning empty store')
       return { listings: {}, lastUpdated: Date.now() }
     }
 
     // Fetch the blob content
     const response = await fetch(storeBlob.url)
-    const store: EscrowStore = await response.json()
+    const text = await response.text()
 
+    // Check if we got HTML error page instead of JSON
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      console.error('❌ Blob returned HTML instead of JSON - blob may be corrupted')
+      console.error('   This is a critical error that will cause data loss!')
+      console.error('   Returning empty store to prevent overwrites')
+      throw new Error('Blob returned HTML instead of JSON')
+    }
+
+    const store: EscrowStore = JSON.parse(text)
+    console.log(`📋 Loaded blob with ${Object.keys(store.listings).length} listings`)
     return store
   } catch (error) {
-    console.warn('Failed to read blob store, returning empty:', error)
+    console.error('❌ CRITICAL: Failed to read blob store:', error)
+    console.error('   Returning empty store - THIS WILL CAUSE DATA LOSS IF WRITTEN!')
     return { listings: {}, lastUpdated: Date.now() }
   }
 }

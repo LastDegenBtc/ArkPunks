@@ -66,6 +66,19 @@ export interface ExecuteSwapResponse {
   message: string
 }
 
+export interface CancelListingRequest {
+  punkId: string
+  sellerPubkey: string
+  sellerArkAddress: string
+}
+
+export interface CancelListingResponse {
+  success: boolean
+  status: 'cancelled'
+  txid?: string
+  message: string
+}
+
 export interface EscrowStatusResponse {
   success: boolean
   listing?: EscrowListing
@@ -213,6 +226,29 @@ export async function executeEscrowSwap(request: ExecuteSwapRequest): Promise<Ex
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.error || 'Failed to execute swap')
+  }
+
+  return response.json()
+}
+
+/**
+ * Cancel an escrow listing and return the punk to the seller
+ *
+ * @param request Cancel request with seller verification
+ * @returns Cancellation result with optional TXID
+ */
+export async function cancelEscrowListing(request: CancelListingRequest): Promise<CancelListingResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/escrow/cancel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request)
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to cancel listing')
   }
 
   return response.json()

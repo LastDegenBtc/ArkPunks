@@ -13,6 +13,22 @@
     }
   ],
   "functions": {
+    "api/escrow/recover.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/escrow/return-all.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/escrow/delist-all.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/escrow/check-deposits.ts": {
+      "memory": 1024,
+      "maxDuration": 20
+    },
     "api/escrow/**/*.ts": {
       "memory": 1024,
       "maxDuration": 10
