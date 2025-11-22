@@ -193,13 +193,13 @@ const samplePunks = computed(() => {
   }
 
   const filtered = allPunks.value.filter(punk => {
-    // Show punk if user owns it directly
+    // Show punk if user owns it directly (includes punks held in escrow with inEscrow flag)
     if (punk.owner === currentWalletAddress.value) {
       return true
     }
 
-    // Also show punk if it's in escrow (owned by escrow pubkey)
-    // This allows sellers to see their punks with "En escrow" badge
+    // Legacy check: Also show punk if it's in escrow (owned by escrow pubkey)
+    // This handles old punks that were listed before the inEscrow flag was added
     if (escrowPubkey.value && punk.owner === escrowPubkey.value) {
       return true
     }
@@ -379,9 +379,8 @@ function getOfficialIndex(punkId: string): number | undefined {
 
 // Check if punk is currently held in escrow
 function isPunkInEscrow(punkId: string): boolean {
-  if (!escrowPubkey.value) return false
   const punk = allPunks.value.find(p => p.punkId === punkId)
-  return punk?.owner === escrowPubkey.value
+  return punk?.inEscrow === true
 }
 
 // Load marketplace listings to check which punks are listed
