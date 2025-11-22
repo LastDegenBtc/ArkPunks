@@ -51,7 +51,7 @@
           </div>
 
           <div v-else class="punk-grid">
-            <div v-for="punk in samplePunks" :key="punk.punkId" class="punk-card-wrapper">
+            <div v-for="punk in samplePunks" :key="`${punk.punkId}-${officialPunksMap.size}`" class="punk-card-wrapper">
               <PunkCard
                 :punk="punk"
                 :is-official="isOfficialPunk(punk.punkId)"
@@ -335,6 +335,15 @@ async function loadOfficialPunks() {
     officialPunksMap.value = map
 
     console.log(`✅ Loaded ${punkIds.length} official punks from authority relay`)
+    console.log(`📊 Official punks map size: ${officialPunksMap.value.size}`)
+
+    // Debug: Check if user's punks are in the official list
+    const userPunkIds = samplePunks.value.map(p => p.punkId)
+    const officialUserPunks = userPunkIds.filter(id => map.has(id))
+    console.log(`🔍 User has ${officialUserPunks.length}/${userPunkIds.length} official punks in gallery`)
+    if (officialUserPunks.length > 0) {
+      console.log(`   Official punk IDs: ${officialUserPunks.map(id => id.slice(0, 8)).join(', ')}...`)
+    }
   } catch (error) {
     console.error('Failed to load official punks:', error)
   }
@@ -342,7 +351,12 @@ async function loadOfficialPunks() {
 
 // Check if a punk is official
 function isOfficialPunk(punkId: string): boolean {
-  return officialPunksMap.value.has(punkId)
+  const isOfficial = officialPunksMap.value.has(punkId)
+  // Debug: Log when checking official status
+  if (isOfficial) {
+    console.log(`   🎯 Punk ${punkId.slice(0, 8)}... IS official (map size: ${officialPunksMap.value.size})`)
+  }
+  return isOfficial
 }
 
 // Get official index (0-999) for a punk
