@@ -28,6 +28,9 @@ const RELAYS = [
   'wss://relay.snort.social'
 ]
 
+// Official relay only - used for supply counting (single source of truth)
+const OFFICIAL_RELAY = 'wss://relay.damus.io'
+
 // Event kinds (Mainnet Launch)
 const KIND_PUNK_MINT = 1400      // Individual punk mint
 const KIND_PUNK_EXIT = 1404      // L1 exit event (punk → Bitcoin address)
@@ -61,16 +64,17 @@ export async function getNostrSupply(): Promise<{
   // Start a new fetch
   supplyFetchPromise = (async () => {
     try {
-      console.log('📡 Fetching punk supply from Nostr relays...')
+      console.log('📡 Fetching punk supply from official relay only...')
+      console.log(`   Using: ${OFFICIAL_RELAY}`)
 
       // Determine current network (default to mainnet if not set)
       const currentNetwork = import.meta.env.VITE_ARKADE_NETWORK || 'mainnet'
       console.log(`   Filtering for network: ${currentNetwork}`)
       console.log(`   VITE_ARKADE_NETWORK env var: "${import.meta.env.VITE_ARKADE_NETWORK}"`)
 
-      // Fetch all punk mint events (kind 1400)
-      // NOTE: We fetch ALL and filter client-side because relay tag filters are unreliable
-      const allEvents = await pool.querySync(RELAYS, {
+      // Fetch all punk mint events (kind 1400) from official relay only
+      // Using single relay ensures consistent supply counts (no relay sync issues)
+      const allEvents = await pool.querySync([OFFICIAL_RELAY], {
         kinds: [KIND_PUNK_MINT],
         '#t': ['arkade-punk'],
         limit: PUNK_SUPPLY_CONFIG.MAX_TOTAL_PUNKS + 100 // Fetch a bit more to be safe
