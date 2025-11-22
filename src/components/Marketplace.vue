@@ -146,7 +146,7 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, computed } from 'vue'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
-import { getMarketplaceListings, publishPunkSold } from '@/utils/marketplaceUtils'
+import { getMarketplaceListings, publishPunkSold, delistPunk } from '@/utils/marketplaceUtils'
 import { getOfficialPunksList } from '@/utils/officialPunkValidator'
 import { buyPunkFromEscrow, executeEscrowSwap, cancelEscrowListing } from '@/utils/escrowApi'
 import { getPublicKey } from 'nostr-tools'
@@ -589,7 +589,41 @@ async function cancelListing(punk: MarketplaceListing) {
 
   } catch (error: any) {
     console.error('❌ Failed to cancel listing:', error)
-    alert(`Cancellation failed:\n\n${error?.message || error}`)
+
+    // If listing not found in escrow, offer to delist from Nostr
+    if (error?.message?.includes('Listing not found')) {
+      const delistConfirm = confirm(
+        `Escrow listing not found in system.\n\n` +
+        `This can happen if the listing wasn't properly saved.\n\n` +
+        `Would you like to delist this punk from Nostr?\n` +
+        `This will remove it from the marketplace.`
+      )
+
+      if (delistConfirm) {
+        try {
+          const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
+          if (!privateKeyHex) throw new Error('Wallet private key not found')
+
+          console.log('📤 Delisting punk from Nostr...')
+          await delistPunk(punk.punkId, privateKeyHex)
+
+          alert(
+            `✅ Punk delisted from Nostr!\n\n` +
+            `The punk should disappear from the marketplace shortly.\n\n` +
+            `Refresh the page to see the change.`
+          )
+
+          await loadListings()
+          if (reloadPunks) await reloadPunks()
+
+        } catch (delistError: any) {
+          console.error('❌ Failed to delist from Nostr:', delistError)
+          alert(`Failed to delist:\n\n${delistError?.message || delistError}`)
+        }
+      }
+    } else {
+      alert(`Cancellation failed:\n\n${error?.message || error}`)
+    }
   } finally {
     cancelling.value = false
   }
