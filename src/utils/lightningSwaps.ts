@@ -7,7 +7,7 @@
  */
 
 import { BoltzSwapProvider, ArkadeLightning } from '@arkade-os/boltz-swap'
-import { RestArkProvider } from '@arkade-os/sdk'
+import { RestArkProvider, RestIndexerProvider } from '@arkade-os/sdk'
 import type { ArkWallet } from '@arkade-os/sdk'
 import { getActiveConfig } from '@/config/arkade'
 
@@ -29,10 +29,15 @@ function initArkadeLightning(wallet: ArkWallet): ArkadeLightning {
     url: config.arkServerUrl
   })
 
+  const indexerProvider = new RestIndexerProvider({
+    url: config.arkServerUrl
+  })
+
   return new ArkadeLightning({
     wallet,
     swapProvider,
-    arkProvider
+    arkProvider,
+    indexerProvider
   })
 }
 
