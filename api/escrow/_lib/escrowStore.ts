@@ -13,9 +13,22 @@ export const ESCROW_PRIVATE_KEY = process.env.ESCROW_WALLET_PRIVATE_KEY || ''
 export const ESCROW_ADDRESS = process.env.ESCROW_WALLET_ADDRESS || 'ark1qq4hfssprtcgnjzf8qlw2f78yvjau5kldfugg29k34y7j96q2w4t4rrk6z965cxsq33k2t2xcl3mvn0faqk88fqaxef3zj6mfjqwj5xwm3vqcd'
 
 // Derive escrow public key from private key for Nostr ownership
-export const ESCROW_PUBKEY = ESCROW_PRIVATE_KEY
-  ? getPublicKey(hex.decode(ESCROW_PRIVATE_KEY))
-  : ''
+function deriveEscrowPubkey(): string {
+  if (!ESCROW_PRIVATE_KEY || ESCROW_PRIVATE_KEY.length === 0) {
+    console.warn('⚠️ ESCROW_PRIVATE_KEY not configured, escrow pubkey will be empty')
+    return ''
+  }
+  try {
+    const pubkey = getPublicKey(hex.decode(ESCROW_PRIVATE_KEY))
+    console.log('✅ Escrow pubkey derived:', pubkey.slice(0, 16) + '...')
+    return pubkey
+  } catch (error) {
+    console.error('❌ Failed to derive escrow pubkey:', error)
+    return ''
+  }
+}
+
+export const ESCROW_PUBKEY = deriveEscrowPubkey()
 
 export interface EscrowListing {
   punkId: string
