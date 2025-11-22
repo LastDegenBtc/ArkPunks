@@ -56,6 +56,7 @@
                 :punk="punk"
                 :is-official="isOfficialPunk(punk.punkId)"
                 :official-index="getOfficialIndex(punk.punkId)"
+                :in-escrow="isPunkInEscrow(punk.punkId)"
               />
               <div class="punk-actions">
                 <button
@@ -178,6 +179,7 @@ const currentWalletAddress = ref<string | null>(null)
 const lastLoggedAddress = ref<string | null>(null) // Track last logged address to avoid spam
 
 // Filtered punks for current wallet only
+// Includes punks owned by wallet AND punks in escrow (to show with badge)
 const samplePunks = computed(() => {
   console.log('🔍 Gallery Debug:')
   console.log('   Current wallet address:', currentWalletAddress.value)
@@ -190,7 +192,18 @@ const samplePunks = computed(() => {
   }
 
   const filtered = allPunks.value.filter(punk => {
-    return punk.owner === currentWalletAddress.value
+    // Show punk if user owns it directly
+    if (punk.owner === currentWalletAddress.value) {
+      return true
+    }
+
+    // Also show punk if it's in escrow (owned by escrow pubkey)
+    // This allows sellers to see their punks with "En escrow" badge
+    if (escrowPubkey.value && punk.owner === escrowPubkey.value) {
+      return true
+    }
+
+    return false
   })
 
   console.log('   ✅ Filtered punks for this wallet:', filtered.length)
@@ -200,6 +213,9 @@ const samplePunks = computed(() => {
 // Official punks list from Nostr authority relay
 const officialPunkIds = ref<string[]>([])
 const officialPunksMap = ref<Map<string, number>>(new Map())
+
+// Escrow pubkey for detecting punks in escrow
+const escrowPubkey = ref<string>('')
 
 // Load all punks from localStorage (with sold punk filtering for normal loads)
 async function loadPunks() {
@@ -302,6 +318,13 @@ function isOfficialPunk(punkId: string): boolean {
 // Get official index (0-999) for a punk
 function getOfficialIndex(punkId: string): number | undefined {
   return officialPunksMap.value.get(punkId)
+}
+
+// Check if punk is currently held in escrow
+function isPunkInEscrow(punkId: string): boolean {
+  if (!escrowPubkey.value) return false
+  const punk = allPunks.value.find(p => p.punkId === punkId)
+  return punk?.owner === escrowPubkey.value
 }
 
 // Load marketplace listings to check which punks are listed
@@ -693,7 +716,12 @@ async function listPunk(punk: PunkState) {
     // If escrow mode, create listing via API
     if (saleMode === 'escrow') {
       console.log('📡 Creating escrow listing...')
-      const { listPunkInEscrow } = await import('./utils/escrowApi')
+      const { listPunkInEscrow, getEscrowInfo } = await import('./utils/escrowApi')
+
+      // Get escrow pubkey
+      const escrowInfo = await getEscrowInfo()
+      const escrowPubkey = escrowInfo.escrowPubkey
+      console.log('   Escrow pubkey:', escrowPubkey.slice(0, 16) + '...')
 
       const escrowListing = await listPunkInEscrow({
         punkId: punk.punkId,
@@ -707,55 +735,54 @@ async function listPunk(punk: PunkState) {
       console.log('✅ Escrow listing created')
       console.log('   Escrow address:', escrowAddress)
 
-      // Automatically send punk to escrow
-      const sendConfirm = confirm(
+      // Transfer punk ownership to escrow via Nostr
+      const transferConfirm = confirm(
         `🛡️ Escrow Listing Created!\n\n` +
-        `Now send your punk to the escrow address.\n\n` +
-        `This will transfer ${punk.metadata.name} to escrow.\n` +
-        `Once a buyer pays, the server will automatically:\n` +
-        `• Send the punk to the buyer\n` +
-        `• Send payment to you (minus 1% fee)\n\n` +
-        `Ready to send punk to escrow?`
+        `Now transfer ${punk.metadata.name} ownership to escrow.\n\n` +
+        `This will:\n` +
+        `• Publish a Nostr event transferring ownership to escrow\n` +
+        `• Your punk will show as "En escrow" in your gallery\n` +
+        `• Once a buyer pays, the escrow will automatically:\n` +
+        `  - Transfer the punk to the buyer\n` +
+        `  - Send ${price.toLocaleString()} sats to you\n\n` +
+        `Ready to transfer punk to escrow?`
       )
 
-      if (!sendConfirm) {
+      if (!transferConfirm) {
         alert(
-          `⚠️ Listing created but punk not sent to escrow.\n\n` +
-          `You must send it manually:\n` +
-          `Escrow address: ${escrowAddress}\n\n` +
-          `The listing won't be active until the punk is in escrow.`
+          `⚠️ Listing created but punk ownership not transferred.\n\n` +
+          `The listing won't be active until you transfer ownership to escrow.`
         )
         return
       }
 
-      // Send punk deposit to escrow (minimal amount to represent ownership)
-      console.log('📦 Sending punk deposit to escrow...')
-      const PUNK_DEPOSIT_AMOUNT = 1000n // 1000 sats deposit represents punk ownership
+      // Publish Nostr event transferring punk to escrow
+      console.log('🔑 Publishing Nostr transfer event to escrow...')
 
       try {
-        // Check balance
-        const balance = await wallet.getBalance()
-        if (balance.available < PUNK_DEPOSIT_AMOUNT) {
-          throw new Error('Insufficient balance for punk deposit (need 1000 sats)')
-        }
-
-        // Send deposit to escrow address
-        const txid = await wallet.send(escrowAddress, PUNK_DEPOSIT_AMOUNT)
-        console.log('✅ Punk deposit sent to escrow! TXID:', txid)
+        // Transfer punk from seller to escrow pubkey
+        await publishPunkTransfer(
+          punk.punkId,
+          myPubkey, // from seller
+          escrowPubkey, // to escrow
+          'escrow-listing', // txid placeholder for listing action
+          privateKeyHex // seller signs the transfer
+        )
+        console.log('✅ Punk ownership transferred to escrow via Nostr!')
 
         alert(
           `✅ Success!\n\n` +
-          `${punk.metadata.name} has been deposited to escrow.\n\n` +
+          `${punk.metadata.name} has been transferred to escrow.\n\n` +
           `Your listing is now active in the marketplace!\n` +
+          `The punk will show as "🛡️ En escrow" in your gallery.\n\n` +
           `When a buyer purchases it, you'll receive ${price.toLocaleString()} sats automatically.`
         )
-      } catch (sendError: any) {
-        console.error('❌ Failed to send punk deposit:', sendError)
+      } catch (nostrError: any) {
+        console.error('❌ Failed to publish Nostr transfer:', nostrError)
         alert(
-          `⚠️ Listing created but failed to send deposit:\n\n` +
-          `${sendError?.message || sendError}\n\n` +
-          `You can try sending 1000 sats manually to:\n` +
-          `${escrowAddress}`
+          `⚠️ Listing created but failed to transfer ownership via Nostr:\n\n` +
+          `${nostrError?.message || nostrError}\n\n` +
+          `Please try listing again.`
         )
         return
       }
@@ -789,6 +816,18 @@ async function listPunk(punk: PunkState) {
 }
 
 // Load punks on mount and on wallet change
+// Load escrow pubkey
+async function loadEscrowPubkey() {
+  try {
+    const { getEscrowInfo } = await import('./utils/escrowApi')
+    const escrowInfo = await getEscrowInfo()
+    escrowPubkey.value = escrowInfo.escrowPubkey
+    console.log('✅ Escrow pubkey loaded:', escrowPubkey.value.slice(0, 16) + '...')
+  } catch (error) {
+    console.error('Failed to load escrow pubkey:', error)
+  }
+}
+
 onMounted(async () => {
   // Use loadPunksFromLocalStorage() to avoid filtering sold punks
   // If user did a Nostr sync before, the data is already correct
@@ -796,6 +835,7 @@ onMounted(async () => {
   updateWalletAddress()
   await loadOfficialPunks()
   await loadMarketplaceListings()
+  await loadEscrowPubkey()
 
   // Reload punks when switching wallets
   setInterval(() => {

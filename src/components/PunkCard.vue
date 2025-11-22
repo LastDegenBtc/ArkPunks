@@ -5,6 +5,9 @@
       <div v-if="isOfficial" class="official-badge" title="Official ArkPunk - Verified on relay.damus.io">
         ✓
       </div>
+      <div v-if="inEscrow" class="escrow-badge" title="This punk is currently held in escrow">
+        🛡️
+      </div>
     </div>
 
     <div class="punk-info">
@@ -52,6 +55,7 @@ interface Props {
   punk: PunkState
   isOfficial?: boolean
   officialIndex?: number
+  inEscrow?: boolean
 }
 
 defineProps<Props>()
@@ -116,6 +120,25 @@ function formatSats(sats: bigint): string {
   cursor: help;
   width: 20px;
   height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.escrow-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  padding: 4px 6px;
+  border-radius: 50%;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: help;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;

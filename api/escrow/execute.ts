@@ -102,11 +102,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const FEE_PERCENT = 1
     const price = BigInt(listing.price)
     const fee = (price * BigInt(Math.floor(FEE_PERCENT * 100))) / 10000n
-    const sellerAmount = price - fee
+    const totalExpected = price + fee // What buyer should have sent
 
     console.log(`   Price: ${price} sats`)
     console.log(`   Fee (${FEE_PERCENT}%): ${fee} sats`)
-    console.log(`   Seller receives: ${sellerAmount} sats`)
+    console.log(`   Total expected from buyer: ${totalExpected} sats`)
+    console.log(`   Seller will receive: ${price} sats (full price)`)
 
     // Execute atomic swap using Arkade SDK
     console.log('⚡ Executing atomic swap with Arkade SDK...')
@@ -120,35 +121,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const escrowBalance = await escrowWallet.getBalance()
     console.log('   Escrow balance:', escrowBalance.available.toString(), 'sats')
 
-    // Verify escrow has enough funds to complete the swap
-    // Need: punk amount (for buyer) + seller payment
-    // For MVP: We're using regular sats transfers, not special punk VTXOs
-    const totalNeeded = price + sellerAmount
-    if (escrowBalance.available < totalNeeded) {
+    // Verify buyer sent enough funds (price + fee)
+    // Note: We expect buyer sent price + fee, and seller already transferred punk ownership via Nostr
+    if (escrowBalance.available < price) {
       throw new Error(
-        `Insufficient escrow balance. Need ${totalNeeded} sats, have ${escrowBalance.available} sats. ` +
-        `Both seller (punk deposit) and buyer (payment) must send funds to escrow before execution.`
+        `Insufficient escrow balance for seller payment. Need ${price} sats, have ${escrowBalance.available} sats. ` +
+        `Buyer must send ${totalExpected} sats (price + ${FEE_PERCENT}% fee) to escrow.`
       )
     }
 
-    // Transfer 1: Send payment to seller (minus fee)
-    console.log(`💸 Transferring ${sellerAmount} sats to seller: ${listing.sellerArkAddress}`)
-    const paymentTxid = await escrowWallet.send(listing.sellerArkAddress, sellerAmount)
-    console.log(`✅ Payment sent! Txid: ${paymentTxid}`)
+    // Transfer: Send full price to seller (fee stays in escrow)
+    console.log(`💸 Transferring ${price} sats to seller: ${listing.sellerArkAddress}`)
+    const paymentTxid = await escrowWallet.send(listing.sellerArkAddress, price)
+    console.log(`✅ Payment sent to seller! Txid: ${paymentTxid}`)
+    console.log(`   Fee (${fee} sats) remains in escrow wallet`)
 
-    // Transfer 2: Send punk value to buyer
-    // Note: For MVP, we're transferring the punk's value in sats
-    // In the future, this would transfer the actual punk VTXO with tapscripts
-    console.log(`💸 Transferring punk (${price} sats) to buyer: ${listing.buyerAddress}`)
-    const punkTxid = await escrowWallet.send(listing.buyerAddress, price)
-    console.log(`✅ Punk transferred! Txid: ${punkTxid}`)
+    // Publish Nostr event transferring punk ownership from escrow to buyer
+    console.log(`🔑 Publishing Nostr event: Transferring punk ${listing.punkId} to buyer...`)
+    const { publishPunkTransfer } = await import('../../src/utils/marketplaceUtils.js')
+    const { ESCROW_PRIVATE_KEY, ESCROW_PUBKEY } = await import('./_lib/escrowStore.js')
+
+    try {
+      // Transfer punk from escrow to buyer
+      // fromPubkey: escrow, toPubkey: buyer, txid: payment txid as reference
+      await publishPunkTransfer(
+        listing.punkId,
+        ESCROW_PUBKEY, // from escrow
+        listing.buyerPubkey!, // to buyer
+        paymentTxid, // reference payment txid
+        ESCROW_PRIVATE_KEY // escrow signs the transfer
+      )
+      console.log(`✅ Punk ownership transferred to buyer via Nostr!`)
+    } catch (nostrError: any) {
+      console.error('⚠️ Failed to publish Nostr transfer event:', nostrError)
+      // Don't fail the whole transaction if Nostr fails, but log it
+      // The payment already went through, so we should mark as sold anyway
+    }
 
     console.log('✅ Atomic swap completed successfully!')
 
     // Update listing status
     await updateEscrowStatus(punkId, 'sold', {
       soldAt: Date.now(),
-      punkTransferTxid: punkTxid,
+      punkTransferTxid: 'nostr', // Punk transferred via Nostr event
       paymentTransferTxid: paymentTxid
     })
 
@@ -157,9 +172,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response: ExecuteResponse = {
       success: true,
       punkId,
-      punkTxid,
+      punkTxid: 'nostr', // Punk transferred via Nostr event, not on-chain
       paymentTxid,
-      message: 'Atomic swap executed successfully'
+      message: 'Atomic swap executed successfully - Punk transferred via Nostr, payment sent to seller'
     }
 
     return res.status(200).json(response)

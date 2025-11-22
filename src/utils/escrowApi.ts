@@ -76,6 +76,23 @@ export interface EscrowStatusResponse {
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 /**
+ * Get escrow wallet information
+ */
+export async function getEscrowInfo(): Promise<{
+  escrowAddress: string
+  escrowPubkey: string
+  network: 'mainnet' | 'testnet'
+}> {
+  const response = await fetch(`${API_BASE_URL}/api/escrow/info`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to get escrow info: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+/**
  * Test if the escrow API is running
  */
 export async function testEscrowApi(): Promise<{ message: string; timestamp: string; version: string }> {

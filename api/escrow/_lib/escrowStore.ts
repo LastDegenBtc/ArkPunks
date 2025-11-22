@@ -5,10 +5,17 @@
  */
 
 import { put, list } from '@vercel/blob'
+import { hex } from '@scure/base'
+import { getPublicKey } from 'nostr-tools'
 
 // Escrow wallet configuration (from Vercel env vars)
 export const ESCROW_PRIVATE_KEY = process.env.ESCROW_WALLET_PRIVATE_KEY || ''
 export const ESCROW_ADDRESS = process.env.ESCROW_WALLET_ADDRESS || 'ark1qq4hfssprtcgnjzf8qlw2f78yvjau5kldfugg29k34y7j96q2w4t4rrk6z965cxsq33k2t2xcl3mvn0faqk88fqaxef3zj6mfjqwj5xwm3vqcd'
+
+// Derive escrow public key from private key for Nostr ownership
+export const ESCROW_PUBKEY = ESCROW_PRIVATE_KEY
+  ? getPublicKey(hex.decode(ESCROW_PRIVATE_KEY))
+  : ''
 
 export interface EscrowListing {
   punkId: string
