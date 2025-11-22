@@ -6,22 +6,25 @@
  * - Send: Arkade → Lightning (reverse swap)
  */
 
-import { BoltzSwapProvider } from '@arkade-os/boltz-swap'
+import { BoltzSwapProvider, ArkadeLightning } from '@arkade-os/boltz-swap'
 import type { ArkWallet } from '@arkade-os/sdk'
 
 const BOLTZ_API = 'https://api.ark.boltz.exchange'
 const NETWORK = 'bitcoin' // mainnet
 
-let boltzProvider: BoltzSwapProvider | null = null
-
 /**
- * Initialize Boltz swap provider
+ * Initialize ArkadeLightning instance with wallet
  */
-export function initBoltzProvider(): BoltzSwapProvider {
-  if (!boltzProvider) {
-    boltzProvider = new BoltzSwapProvider(BOLTZ_API, NETWORK)
-  }
-  return boltzProvider
+function initArkadeLightning(wallet: ArkWallet): ArkadeLightning {
+  const swapProvider = new BoltzSwapProvider({
+    apiUrl: BOLTZ_API,
+    network: NETWORK
+  })
+
+  return new ArkadeLightning({
+    wallet,
+    swapProvider
+  })
 }
 
 /**
@@ -35,18 +38,21 @@ export async function createReceiveInvoice(
   wallet: ArkWallet,
   amountSats: number
 ) {
-  const provider = initBoltzProvider()
+  const arkadeLightning = initArkadeLightning(wallet)
 
   try {
-    const invoice = await provider.createInvoice(wallet, amountSats)
+    const result = await arkadeLightning.createLightningInvoice({
+      amount: amountSats,
+      description: 'Arkade Punks - Lightning to Arkade'
+    })
 
     return {
-      bolt11: invoice.invoice,
-      paymentHash: invoice.paymentHash,
-      preimage: invoice.preimage,
-      amount: amountSats,
-      swapId: invoice.swapId,
-      expiry: invoice.expiry
+      bolt11: result.invoice,
+      paymentHash: result.paymentHash,
+      preimage: result.preimage,
+      amount: result.amount,
+      pendingSwap: result.pendingSwap,
+      expiry: result.expiry
     }
   } catch (error: any) {
     console.error('Failed to create receive invoice:', error)
@@ -58,19 +64,19 @@ export async function createReceiveInvoice(
  * Wait for payment and claim to Arkade wallet
  *
  * @param wallet - Arkade wallet instance
- * @param swapId - Swap ID from createInvoice
+ * @param pendingSwap - Pending swap object from createInvoice
  * @returns Transaction ID when claimed
  */
 export async function waitAndClaimPayment(
   wallet: ArkWallet,
-  swapId: string
+  pendingSwap: any
 ): Promise<string> {
-  const provider = initBoltzProvider()
+  const arkadeLightning = initArkadeLightning(wallet)
 
   try {
-    const txid = await provider.waitAndClaim(wallet, swapId)
-    console.log('✅ Lightning payment claimed:', txid)
-    return txid
+    const result = await arkadeLightning.waitAndClaim(pendingSwap)
+    console.log('✅ Lightning payment claimed:', result.txid)
+    return result.txid
   } catch (error: any) {
     console.error('Failed to claim payment:', error)
     throw new Error(`Failed to claim payment: ${error.message}`)
@@ -84,10 +90,13 @@ export async function waitAndClaimPayment(
  * @returns Invoice details
  */
 export async function decodeInvoice(bolt11: string) {
-  const provider = initBoltzProvider()
+  const swapProvider = new BoltzSwapProvider({
+    apiUrl: BOLTZ_API,
+    network: NETWORK
+  })
 
   try {
-    const decoded = await provider.decodeInvoice(bolt11)
+    const decoded = await swapProvider.decodeInvoice(bolt11)
     return {
       amount: decoded.amount,
       paymentHash: decoded.paymentHash,
@@ -114,7 +123,7 @@ export async function payLightningInvoice(
   bolt11: string,
   maxFeeSats?: number
 ) {
-  const provider = initBoltzProvider()
+  const arkadeLightning = initArkadeLightning(wallet)
 
   try {
     // Decode invoice first to show user the amount
@@ -122,13 +131,16 @@ export async function payLightningInvoice(
 
     console.log(`💸 Paying ${decoded.amount} sats via Lightning...`)
 
-    const result = await provider.payInvoice(wallet, bolt11, maxFeeSats)
+    const result = await arkadeLightning.sendLightningPayment({
+      invoice: bolt11,
+      maxFeeSats
+    })
 
     return {
       preimage: result.preimage,
-      paymentHash: result.paymentHash,
-      amount: decoded.amount,
-      fee: result.fee
+      paymentHash: decoded.paymentHash,
+      amount: result.amount,
+      txid: result.txid
     }
   } catch (error: any) {
     console.error('Failed to pay invoice:', error)
@@ -140,10 +152,10 @@ export async function payLightningInvoice(
  * Get pending swaps from storage (if storage was initialized)
  */
 export async function getPendingSwaps(wallet: ArkWallet) {
-  const provider = initBoltzProvider()
+  const arkadeLightning = initArkadeLightning(wallet)
 
   try {
-    const pending = await provider.getPendingSwaps(wallet)
+    const pending = await arkadeLightning.getPendingSwaps()
     return pending || []
   } catch (error) {
     console.warn('Could not fetch pending swaps:', error)

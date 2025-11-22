@@ -207,7 +207,7 @@ async function generateInvoice() {
 
     // Start monitoring for payment
     paymentStatus.value = 'waiting'
-    monitorPayment(wallet, invoice.swapId)
+    monitorPayment(wallet, invoice.pendingSwap)
 
   } catch (error: any) {
     console.error('Failed to generate invoice:', error)
@@ -241,13 +241,13 @@ async function generateQRCode(text: string) {
 /**
  * Monitor payment and claim when received
  */
-async function monitorPayment(wallet: any, swapId: string) {
+async function monitorPayment(wallet: any, pendingSwap: any) {
   try {
-    console.log('⏳ Monitoring swap:', swapId)
+    console.log('⏳ Monitoring swap:', pendingSwap)
 
     paymentStatus.value = 'waiting'
 
-    const txid = await waitAndClaimPayment(wallet, swapId)
+    const txid = await waitAndClaimPayment(wallet, pendingSwap)
 
     console.log('✅ Payment claimed:', txid)
     paymentStatus.value = 'completed'
