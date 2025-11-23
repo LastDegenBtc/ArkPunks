@@ -115,14 +115,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       try {
         // Get escrow wallet
+        console.log('   Step 1: Initializing escrow wallet...')
         const escrowWallet = await getEscrowWallet()
+        console.log(`   ✅ Escrow wallet initialized: ${escrowWallet.arkadeAddress}`)
 
         // Find the punk VTXO in escrow wallet
         // SDK returns flat structure: { txid, vout, value }
+        console.log('   Step 2: Fetching VTXOs from escrow wallet...')
         const vtxos = await escrowWallet.getVtxos()
+        console.log(`   ✅ Found ${vtxos.length} VTXOs in escrow wallet`)
 
-        console.log(`   Searching for VTXO outpoint: ${listing.punkVtxoOutpoint}`)
-        console.log(`   Available VTXOs: ${vtxos.length}`)
+        console.log(`   Step 3: Searching for VTXO outpoint: ${listing.punkVtxoOutpoint}`)
+
+        // Log all VTXOs for debugging
+        vtxos.forEach((v, i) => {
+          console.log(`   VTXO[${i}]: ${v.txid}:${v.vout} (${v.value} sats)`)
+        })
 
         // Try to find by exact outpoint first
         let punkVtxo = vtxos.find(v =>
@@ -216,9 +224,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       } catch (error: any) {
         console.error('❌ Error returning punk to seller:', error)
+        console.error('   Error name:', error.name)
+        console.error('   Error message:', error.message)
+        console.error('   Error stack:', error.stack)
+
         return res.status(500).json({
           error: 'Failed to return punk to seller',
-          details: error.message
+          details: error.message,
+          errorType: error.name,
+          listing: {
+            punkId: listing.punkId,
+            status: listing.status,
+            punkVtxoOutpoint: listing.punkVtxoOutpoint,
+            sellerAddress: listing.sellerArkAddress
+          }
         })
       }
     }

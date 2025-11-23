@@ -591,7 +591,11 @@ async function delistPunkFromMarket(punk: PunkState) {
         const { cancelEscrowListing } = await import('./utils/escrowApi')
         const arkAddress = wallet.arkadeAddress || ''
 
-        await cancelEscrowListing(punk.punkId, myPubkey, arkAddress)
+        await cancelEscrowListing({
+          punkId: punk.punkId,
+          sellerPubkey: myPubkey,
+          sellerArkAddress: arkAddress
+        })
         console.log('✅ Escrow cancelled, collateral returned')
       } catch (escrowError: any) {
         console.error('❌ Failed to cancel escrow:', escrowError)
@@ -615,10 +619,10 @@ async function delistPunkFromMarket(punk: PunkState) {
 
       // Clear escrow flag if was in escrow
       if (punk.inEscrow) {
-        const punkIndex = punks.value.findIndex(p => p.punkId === punk.punkId)
+        const punkIndex = allPunks.value.findIndex(p => p.punkId === punk.punkId)
         if (punkIndex !== -1) {
-          punks.value[punkIndex].inEscrow = false
-          punks.value[punkIndex].listingPrice = 0n
+          allPunks.value[punkIndex].inEscrow = false
+          allPunks.value[punkIndex].listingPrice = 0n
           savePunksToLocalStorage()
           console.log(`✅ Cleared escrow flag for punk ${punk.punkId.slice(0, 8)}...`)
         }
