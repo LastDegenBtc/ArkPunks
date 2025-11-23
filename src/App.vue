@@ -838,9 +838,15 @@ async function listPunk(punk: PunkState) {
       // Send punk VTXO to escrow address
       console.log(`📤 Sending punk VTXO to escrow address: ${escrowAddress}`)
 
+      let newVtxoOutpoint = punk.vtxoOutpoint
+
       try {
         const txid = await wallet.send(escrowAddress, BigInt(punkVtxo.value))
         console.log(`✅ Punk sent to escrow! Txid: ${txid}`)
+
+        // The new VTXO outpoint will be txid:0 (recipient gets vout 0)
+        newVtxoOutpoint = `${txid}:0`
+        console.log(`   New VTXO outpoint: ${newVtxoOutpoint}`)
 
         alert(
           `✅ Success!\n\n` +
@@ -859,13 +865,16 @@ async function listPunk(punk: PunkState) {
         )
         return
       }
+
+      // Update the vtxo outpoint to use the new one after escrow transfer
+      punk.vtxoOutpoint = newVtxoOutpoint
     }
 
     // Publish listing to Nostr
     const success = await listPunkForSale(
       punk.punkId,
       BigInt(price),
-      punk.vtxoOutpoint,
+      punk.vtxoOutpoint, // Use updated outpoint after escrow transfer
       compressedHex,
       privateKeyHex,
       arkAddress,
