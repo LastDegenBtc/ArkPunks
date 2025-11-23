@@ -137,6 +137,15 @@
           <span class="value">{{ formatSats(punkLockedBalance) }} sats</span>
         </div>
 
+        <!-- Reserve deficit warning (over-minting bug) -->
+        <div v-if="reserveDeficit > 0n" class="detail-row reserve-deficit-warning">
+          <span class="label">⚠️ Missing reserve:</span>
+          <span class="value">{{ formatSats(reserveDeficit) }} sats</span>
+          <button @click="claimMissingReserve" class="btn-claim-reserve" :disabled="claiming">
+            {{ claiming ? 'Claiming...' : 'Claim Missing Sats' }}
+          </button>
+        </div>
+
         <div v-if="balance.recoverable > 0n" class="detail-row recoverable-warning">
           <span class="label">⏳ Recoverable (not spendable):</span>
           <span class="value">
@@ -425,6 +434,7 @@ const balance = ref<WalletBalance>({
 const vtxoCount = ref(0)
 const vtxos = ref<VtxoInput[]>([]) // Store VTXOs to calculate punk-locked balance
 const punkBalanceTrigger = ref(0) // Reactive trigger to force punkLockedBalance recalculation
+const claiming = ref(false) // Reserve claim in progress
 
 // Lightning state
 const lightningTab = ref<'receive' | 'send'>('receive')
@@ -527,6 +537,41 @@ const canMintPunks = computed(() => availableForMinting.value >= minVtxoValue)
 
 const possibleMints = computed(() => {
   return Number(availableForMinting.value / minVtxoValue)
+})
+
+// Calculate reserve deficit (over-minting bug)
+// Users may have more punks than their balance allows (punks * 10k > total balance)
+const reserveDeficit = computed(() => {
+  // Force recalculation when trigger changes
+  punkBalanceTrigger.value
+
+  try {
+    const punksJson = localStorage.getItem('arkade_punks')
+    if (!punksJson) return 0n
+
+    const punks = JSON.parse(punksJson)
+    if (!Array.isArray(punks) || punks.length === 0) return 0n
+
+    // Count punks owned by this wallet (exclude escrowed)
+    const ownedPunks = punks.filter((punk: any) =>
+      punk.owner === walletAddress.value && !punk.inEscrow
+    )
+
+    const punkCount = ownedPunks.length
+    if (punkCount === 0) return 0n
+
+    // Required reserve: punks × 10,000 sats
+    const PUNK_VALUE = 10000n
+    const requiredReserve = BigInt(punkCount) * PUNK_VALUE
+
+    // Deficit = required - current total balance
+    const deficit = requiredReserve - balance.value.total
+
+    return deficit > 0n ? deficit : 0n
+  } catch (error) {
+    console.error('Failed to calculate reserve deficit:', error)
+    return 0n
+  }
 })
 
 const isValidHex = computed(() => {
@@ -879,6 +924,73 @@ async function copyBoardingAddress() {
     alert('⚡ Boarding address copied! Use this for on-chain funding.')
   } catch {
     console.error('Failed to copy boarding address')
+  }
+}
+
+async function claimMissingReserve() {
+  if (reserveDeficit.value <= 0n) {
+    alert('No missing reserve to claim!')
+    return
+  }
+
+  const confirmed = confirm(
+    `🎨 Claim Missing Punk Reserve\n\n` +
+    `You have a deficit of ${formatSats(reserveDeficit.value)} sats.\n\n` +
+    `Due to a bug, you were able to mint more punks than your balance allowed.\n` +
+    `This will send you the missing sats from escrow fees.\n\n` +
+    `Continue?`
+  )
+
+  if (!confirmed) return
+
+  claiming.value = true
+
+  try {
+    console.log('💰 Claiming missing punk reserve...')
+    console.log(`   Deficit: ${reserveDeficit.value} sats`)
+
+    // Count punks
+    const punksJson = localStorage.getItem('arkade_punks')
+    const punks = punksJson ? JSON.parse(punksJson) : []
+    const ownedPunks = punks.filter((punk: any) =>
+      punk.owner === walletAddress.value && !punk.inEscrow
+    )
+
+    const response = await fetch('/api/punks/claim-reserve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAddress: walletAddress.value,
+        punkCount: ownedPunks.length,
+        currentBalance: balance.value.total.toString()
+      })
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || data.details || 'Failed to claim reserve')
+    }
+
+    if (data.claimed && data.txid) {
+      console.log(`✅ Reserve claimed! Txid: ${data.txid}`)
+      alert(
+        `✅ Success!\n\n` +
+        `${data.message}\n\n` +
+        `Txid: ${data.txid.slice(0, 16)}...\n\n` +
+        `Refreshing balance...`
+      )
+
+      // Refresh balance after claim
+      await refreshBalance()
+    } else {
+      alert(data.message)
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to claim reserve:', error)
+    alert(`Failed to claim reserve:\n\n${error.message}`)
+  } finally {
+    claiming.value = false
   }
 }
 
@@ -1641,6 +1753,43 @@ h3 {
 .detail-row.recoverable-warning .label {
   color: #ff9800;
   font-weight: 600;
+}
+
+.detail-row.reserve-deficit-warning {
+  background: rgba(244, 67, 54, 0.1);
+  padding: 12px;
+  border-radius: 4px;
+  border-left: 3px solid #f44336;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-row.reserve-deficit-warning .label {
+  color: #f44336;
+  font-weight: 600;
+}
+
+.btn-claim-reserve {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+}
+
+.btn-claim-reserve:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3);
+}
+
+.btn-claim-reserve:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Nostr Public Key Section */

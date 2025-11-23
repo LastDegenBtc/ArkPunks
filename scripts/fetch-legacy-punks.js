@@ -8,9 +8,9 @@ import { SimplePool } from 'nostr-tools'
 const OFFICIAL_RELAY = 'wss://relay.damus.io'
 const KIND_PUNK_MINT = 1400
 
-// Launch date: Nov 22, 2024, 12:00 CET (11:00 UTC) from config
-const LAUNCH_DATE = new Date('2024-11-22T11:00:00Z')
-const CUTOFF_DATE = new Date(LAUNCH_DATE.getTime() + 6 * 60 * 60 * 1000) // 6 hours after launch
+// Launch date: Nov 21, 2025, 18:00 CET (17:00 UTC) from config
+const LAUNCH_DATE = new Date('2025-11-21T17:00:00Z')
+const CUTOFF_DATE = new Date(LAUNCH_DATE.getTime() + 24 * 60 * 60 * 1000) // 24 hours after launch
 
 console.log('🔍 Fetching punks minted during launch without server signatures...')
 console.log(`   Launch window: ${LAUNCH_DATE.toISOString()} to ${CUTOFF_DATE.toISOString()}`)
