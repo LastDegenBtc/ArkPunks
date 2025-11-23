@@ -424,6 +424,7 @@ const balance = ref<WalletBalance>({
 })
 const vtxoCount = ref(0)
 const vtxos = ref<VtxoInput[]>([]) // Store VTXOs to calculate punk-locked balance
+const punkBalanceTrigger = ref(0) // Reactive trigger to force punkLockedBalance recalculation
 
 // Lightning state
 const lightningTab = ref<'receive' | 'send'>('receive')
@@ -480,6 +481,9 @@ const lightningEnabled = computed(() => {
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
 const punkLockedBalance = computed(() => {
+  // Force recalculation when trigger changes
+  punkBalanceTrigger.value
+
   try {
     const punksJson = localStorage.getItem('arkade_punks')
     if (!punksJson) return 0n
@@ -1221,11 +1225,18 @@ function getWallet(): ArkadeWalletInterface | null {
   return wallet
 }
 
+// Force punk balance recalculation (call after minting/buying/selling punks)
+function refreshPunkBalance() {
+  punkBalanceTrigger.value++
+  console.log('🔄 Punk balance recalculation triggered')
+}
+
 // Expose wallet to parent
 defineExpose({
   getWallet,
   wallet: computed(() => wallet),
-  connected
+  connected,
+  refreshPunkBalance
 })
 </script>
 

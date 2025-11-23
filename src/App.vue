@@ -179,6 +179,11 @@ provide('reloadPunks', async () => {
   await loadPunksFromLocalStorage()
 })
 
+// Provide function to refresh punk locked balance
+provide('refreshPunkBalance', () => {
+  walletConnectRef.value?.refreshPunkBalance?.()
+})
+
 // All punks from localStorage
 const allPunks = ref<PunkState[]>([])
 

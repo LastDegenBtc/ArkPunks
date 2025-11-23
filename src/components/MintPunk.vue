@@ -222,6 +222,7 @@ import { getPublicKey } from 'nostr-tools'
 
 // Inject wallet from parent (App.vue)
 const wallet = inject<() => ArkadeWalletInterface | null>('getWallet')
+const refreshPunkBalance = inject<() => void>('refreshPunkBalance')
 
 // Launch date configuration
 const LAUNCH_DATE = new Date(PUNK_SUPPLY_CONFIG.LAUNCH_DATE).getTime()
@@ -490,6 +491,9 @@ async function mint() {
       localStorage.setItem('arkade_punks', JSON.stringify(punks, (key, value) =>
         typeof value === 'bigint' ? value.toString() : value
       ))
+
+      // Refresh punk locked balance to prevent over-minting
+      refreshPunkBalance?.()
     }
 
     // 5. Publish to Nostr relays
