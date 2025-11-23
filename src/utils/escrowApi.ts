@@ -142,6 +142,29 @@ export async function listPunkInEscrow(request: ListPunkRequest): Promise<ListPu
 }
 
 /**
+ * Update the VTXO outpoint for an escrow listing after sending the punk
+ *
+ * @param punkId Punk identifier
+ * @param newVtxoOutpoint New VTXO outpoint after wallet.send()
+ */
+export async function updateEscrowOutpoint(punkId: string, newVtxoOutpoint: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/escrow/update-outpoint`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ punkId, newVtxoOutpoint })
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Failed to update escrow outpoint')
+  }
+
+  console.log(`✅ Updated escrow outpoint for ${punkId}: ${newVtxoOutpoint}`)
+}
+
+/**
  * Buy a punk from escrow
  *
  * @param request Purchase details including payment TXID

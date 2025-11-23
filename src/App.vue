@@ -848,6 +848,12 @@ async function listPunk(punk: PunkState) {
         newVtxoOutpoint = `${txid}:0`
         console.log(`   New VTXO outpoint: ${newVtxoOutpoint}`)
 
+        // Update escrow storage with the new outpoint
+        console.log('📡 Updating escrow storage with new outpoint...')
+        const { updateEscrowOutpoint } = await import('./utils/escrowApi')
+        await updateEscrowOutpoint(punk.punkId, newVtxoOutpoint)
+        console.log('✅ Escrow storage updated with new outpoint')
+
         alert(
           `✅ Success!\n\n` +
           `${punk.metadata.name} has been sent to escrow.\n\n` +
