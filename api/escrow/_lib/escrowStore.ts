@@ -37,6 +37,7 @@ export interface EscrowListing {
   price: string // bigint as string
   punkVtxoOutpoint: string
   escrowAddress: string
+  compressedMetadata?: string // Store metadata upfront to avoid Nostr query during execute
   status: 'pending' | 'deposited' | 'sold' | 'cancelled'
   createdAt: number
   depositedAt?: number

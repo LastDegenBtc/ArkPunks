@@ -144,9 +144,8 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
     for (const [punkId, event] of latestEventsByPunk.entries()) {
       if (officialPunkSet.has(punkId)) {
         officialListings.set(punkId, event)
-      } else {
-        console.log(`   ⏭️  Skipping non-official punk: ${punkId.slice(0, 8)}...`)
       }
+      // Skip non-official punks silently
     }
 
     console.log(`📊 Marketplace: ${officialListings.size} official punks with listings (filtered from ${latestEventsByPunk.size} total)`)
@@ -174,14 +173,12 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
 
         // Skip delisted punks (price = 0)
         if (price === 0n) {
-          console.log(`   ⏭️  Skipping delisted punk: ${punkId.slice(0, 8)}...`)
           continue
         }
 
         // Skip sold punks (has a sold event newer than listing)
         const soldTimestamp = soldPunksMap.get(punkId)
         if (soldTimestamp && soldTimestamp > event.created_at) {
-          console.log(`   ⏭️  Skipping sold punk: ${punkId.slice(0, 8)}... (sold at ${soldTimestamp})`)
           continue
         }
 
@@ -192,7 +189,6 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
             const blobListing = await getEscrowStatus(punkId)
 
             if (blobListing && (blobListing.status === 'sold' || blobListing.status === 'cancelled')) {
-              console.log(`   ⏭️  Skipping ${blobListing.status} escrow punk: ${punkId.slice(0, 8)}... (blob status: ${blobListing.status})`)
               continue
             }
 
@@ -780,7 +776,6 @@ export async function syncPunksFromNostr(
 
         // Skip if sold and not bought back (but include escrow-held punks)
         if (ownership && ownership.currentOwner !== myPubkey && !isInEscrow) {
-          console.log(`   Skipping ${punkId}: sold to ${ownership.currentOwner?.slice(0, 8)}...`)
           continue
         }
 

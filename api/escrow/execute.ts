@@ -177,16 +177,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log('✅ Atomic swap completed successfully!')
 
-    // Update listing status
-    await updateEscrowStatus(punkId, 'sold', {
-      soldAt: Date.now(),
-      punkTransferTxid: 'nostr', // Punk transferred via Nostr event
-      paymentTransferTxid: paymentTxid
-    })
+    // Run blob update and Nostr publish in parallel for speed
+    const [_, __] = await Promise.allSettled([
+      // Update listing status in blob
+      updateEscrowStatus(punkId, 'sold', {
+        soldAt: Date.now(),
+        punkTransferTxid: 'nostr', // Punk transferred via Nostr event
+        paymentTransferTxid: paymentTxid
+      }),
 
-    // Publish KIND_PUNK_SOLD event so the buyer/seller tracking works
-    console.log(`📝 Publishing sold event for ${listing.punkId}...`)
-    try {
+      // Publish KIND_PUNK_SOLD event to Nostr (parallel!)
+      (async () => {
+        console.log(`📝 Publishing sold event for ${listing.punkId}...`)
+        try {
       const { SimplePool, finalizeEvent } = await import('nostr-tools')
       const { hex } = await import('@scure/base')
 
@@ -201,37 +204,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const currentNetwork = process.env.VITE_ARKADE_NETWORK || 'mainnet'
 
-      // Fetch the original listing event to get compressed metadata for the buyer
-      console.log(`   🔍 Fetching original listing event to get metadata...`)
-      const pool = new SimplePool()
-      let compressedMetadata = ''
+      // Get compressed metadata from blob (fast!) instead of querying Nostr
+      const compressedMetadata = listing.compressedMetadata || ''
 
-      try {
-        const listingEvents = await pool.querySync(RELAYS, {
-          kinds: [KIND_PUNK_LISTING],
-          authors: [listing.sellerPubkey],
-          limit: 100
-        })
-
-        // Find the listing event for this specific punk
-        const listingEvent = listingEvents.find(e => {
-          const punkIdTag = e.tags.find(t => t[0] === 'punk_id')
-          return punkIdTag && punkIdTag[1] === listing.punkId
-        })
-
-        if (listingEvent) {
-          const compressedTag = listingEvent.tags.find(t => t[0] === 'compressed')
-          if (compressedTag) {
-            compressedMetadata = compressedTag[1]
-            console.log(`   ✅ Found compressed metadata (${compressedMetadata.length} chars)`)
-          } else {
-            console.warn(`   ⚠️  Listing event found but no compressed tag`)
-          }
-        } else {
-          console.warn(`   ⚠️  Could not find original listing event for punk ${listing.punkId}`)
-        }
-      } catch (fetchError: any) {
-        console.error(`   ⚠️  Failed to fetch listing event:`, fetchError)
+      if (compressedMetadata) {
+        console.log(`   ✅ Using metadata from blob (${compressedMetadata.length} chars) - no Nostr query needed!`)
+      } else {
+        console.warn(`   ⚠️  No metadata in blob - buyer will need to search for mint event (slower)`)
       }
 
       const soldEventTemplate = {
@@ -255,11 +234,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await Promise.any(pool.publish(RELAYS, signedSoldEvent))
       pool.close(RELAYS)
 
-      console.log(`✅ Sold event published to Nostr!${compressedMetadata ? ' (with metadata)' : ' (without metadata)'}`)
-    } catch (soldEventError: any) {
-      console.error('⚠️ Failed to publish sold event:', soldEventError)
-      // Don't fail the whole transaction if Nostr fails
-    }
+          console.log(`✅ Sold event published to Nostr!${compressedMetadata ? ' (with metadata)' : ' (without metadata)'}`)
+        } catch (soldEventError: any) {
+          console.error('⚠️ Failed to publish sold event:', soldEventError)
+          // Don't fail the whole transaction if Nostr fails
+        }
+      })()
+    ])
+
+    console.log('✅ Blob and Nostr updates completed (parallel)')
 
     console.log('✅ Escrow execution completed')
 

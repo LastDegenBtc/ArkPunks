@@ -115,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onMounted, computed, watch } from 'vue'
+import { ref, provide, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import PunkCard from './components/PunkCard.vue'
 import MintPunk from './components/MintPunk.vue'
 import Marketplace from './components/Marketplace.vue'
@@ -835,18 +835,25 @@ async function listPunk(punk: PunkState) {
     if (saleMode === 'escrow') {
       console.log('📡 Creating escrow listing...')
       const { listPunkInEscrow, getEscrowInfo } = await import('./utils/escrowApi')
+      const { compressPunkMetadata, compressedToHex } = await import('./utils/compression')
 
       // Get escrow pubkey
       const escrowInfo = await getEscrowInfo()
       const escrowPubkey = escrowInfo.escrowPubkey
       console.log('   Escrow pubkey:', escrowPubkey.slice(0, 16) + '...')
 
+      // Compress metadata for buyer recovery (optimization: no Nostr query needed later)
+      const compressed = compressPunkMetadata(punk.metadata)
+      const compressedMetadata = compressedToHex(compressed)
+      console.log(`   Compressed metadata: ${compressedMetadata.length} chars`)
+
       const escrowListing = await listPunkInEscrow({
         punkId: punk.punkId,
         sellerPubkey: myPubkey,
         sellerArkAddress: arkAddress,
         price: price.toString(),
-        punkVtxoOutpoint: punk.vtxoOutpoint
+        punkVtxoOutpoint: punk.vtxoOutpoint,
+        compressedMetadata
       })
 
       escrowAddress = escrowListing.escrowAddress
@@ -1012,12 +1019,36 @@ onMounted(async () => {
   })
 
   // Reload punks when switching wallets
-  setInterval(() => {
+  const walletCheckInterval = setInterval(() => {
     const currentAddress = walletConnectRef.value?.getWallet?.()?.address
     if (currentAddress !== currentWalletAddress.value) {
       updateWalletAddress()
     }
   }, 1000)
+
+  // Auto-refresh marketplace every 30 seconds (only when tab is visible)
+  const marketplaceRefreshInterval = setInterval(async () => {
+    if (document.visibilityState === 'visible' && currentView.value === 'marketplace') {
+      console.log('🔄 Auto-refreshing marketplace...')
+      await loadMarketplaceListings()
+    }
+  }, 30000)
+
+  // Auto-refresh punks every 60 seconds (only when tab is visible)
+  const punksRefreshInterval = setInterval(async () => {
+    if (document.visibilityState === 'visible' && currentView.value === 'gallery') {
+      console.log('🔄 Auto-refreshing punks...')
+      await loadPunksFromLocalStorage()
+      await loadOfficialPunks()
+    }
+  }, 60000)
+
+  // Cleanup intervals on unmount
+  onBeforeUnmount(() => {
+    clearInterval(walletCheckInterval)
+    clearInterval(marketplaceRefreshInterval)
+    clearInterval(punksRefreshInterval)
+  })
 })
 </script>
 

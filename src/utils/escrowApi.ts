@@ -25,6 +25,7 @@ export interface ListPunkRequest {
   sellerArkAddress: string
   price: string
   punkVtxoOutpoint: string
+  compressedMetadata?: string // Punk metadata for buyer recovery
 }
 
 export interface ListPunkResponse {

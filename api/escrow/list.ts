@@ -20,6 +20,7 @@ interface ListRequest {
   sellerArkAddress: string
   price: string // bigint as string
   punkVtxoOutpoint: string
+  compressedMetadata?: string // Punk metadata (compressed hex) - stored for buyer recovery
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -39,7 +40,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sellerPubkey,
       sellerArkAddress,
       price,
-      punkVtxoOutpoint
+      punkVtxoOutpoint,
+      compressedMetadata
     } = req.body as ListRequest
 
     console.log('   Received listing request for punk:', punkId)
@@ -63,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       price,
       punkVtxoOutpoint,
       escrowAddress,
+      compressedMetadata, // Store metadata for fast buyer recovery
       status: 'pending',
       createdAt: Date.now()
     })
