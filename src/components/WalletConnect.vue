@@ -198,8 +198,27 @@
 
               <span v-if="balance.preconfirmed > 0n">
                 ⏳ You have <strong>{{ balance.preconfirmed }}</strong> sats in preconfirmed VTXOs.<br>
-                These need to complete the Arkade round cycle (1-2 minutes).<br>
-                <strong>Just wait a few minutes and refresh your balance.</strong>
+
+                <!-- Show expiration info if available -->
+                <span v-if="vtxoExpirationInfo">
+                  <br>
+                  <strong>⏰ VTXO Expiration:</strong><br>
+                  <span v-if="vtxoExpirationInfo.isExpired" class="expiry-expired">
+                    ✅ Your VTXOs have expired! They should now be recoverable.<br>
+                    Click "Refresh" and use the recover button below.
+                  </span>
+                  <span v-else class="expiry-pending">
+                    📅 Expires: {{ vtxoExpirationInfo.expiryDate }}<br>
+                    ⏱️ Time remaining: {{ vtxoExpirationInfo.timeRemaining }}<br>
+                    <br>
+                    <em>Note: Arkade mainnet is in testing. Regular batch swaps are not running yet.<br>
+                    Your VTXOs will become recoverable after expiry. You can then use the recover button to reclaim your funds.</em>
+                  </span>
+                </span>
+                <span v-else>
+                  These normally complete the Arkade round cycle (1-2 minutes).<br>
+                  <strong>Just wait a few minutes and refresh your balance.</strong>
+                </span>
               </span>
               <span v-else-if="balance.recoverable > 0n">
                 🔄 You have <strong>{{ balance.recoverable }}</strong> sats in recoverable VTXOs.<br>
@@ -611,6 +630,56 @@ const canMintPunks = computed(() => availableForMinting.value >= minVtxoValue)
 
 const possibleMints = computed(() => {
   return Number(availableForMinting.value / minVtxoValue)
+})
+
+// Detect VTXOs with upcoming expiration
+const vtxoExpirationInfo = computed(() => {
+  // Check if we have any preconfirmed VTXOs with expiration dates
+  const preconfirmedVtxos = vtxos.value.filter((v: any) => {
+    const state = v.virtualStatus?.state || 'unknown'
+    return state === 'preconfirmed' && v.virtualStatus?.batchExpiry
+  })
+
+  if (preconfirmedVtxos.length === 0) {
+    return null
+  }
+
+  // Find the earliest expiration
+  const earliestVtxo = preconfirmedVtxos.reduce((earliest: any, current: any) => {
+    const currentExpiry = current.virtualStatus.batchExpiry
+    const earliestExpiry = earliest.virtualStatus.batchExpiry
+    return currentExpiry < earliestExpiry ? current : earliest
+  })
+
+  const expiryTimestamp = earliestVtxo.virtualStatus.batchExpiry
+
+  // Format expiration date
+  const expiryDate = new Date(expiryTimestamp)
+  const now = new Date()
+  const msUntilExpiry = expiryTimestamp - now.getTime()
+
+  // Calculate time until expiry
+  const daysUntil = Math.floor(msUntilExpiry / (1000 * 60 * 60 * 24))
+  const hoursUntil = Math.floor((msUntilExpiry % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  const minutesUntil = Math.floor((msUntilExpiry % (1000 * 60 * 60)) / (1000 * 60))
+
+  let timeRemaining = ''
+  if (msUntilExpiry < 0) {
+    timeRemaining = 'Expired - ready to recover!'
+  } else if (daysUntil > 0) {
+    timeRemaining = `${daysUntil}d ${hoursUntil}h remaining`
+  } else if (hoursUntil > 0) {
+    timeRemaining = `${hoursUntil}h ${minutesUntil}m remaining`
+  } else {
+    timeRemaining = `${minutesUntil}m remaining`
+  }
+
+  return {
+    count: preconfirmedVtxos.length,
+    expiryDate: expiryDate.toLocaleString(),
+    timeRemaining,
+    isExpired: msUntilExpiry < 0
+  }
 })
 
 // Calculate marketplace reserve info (over-minting bug)
@@ -2081,6 +2150,28 @@ h3 {
 .troubleshooting-content .info-text strong {
   color: #ff9800;
   font-weight: 600;
+}
+
+.expiry-expired {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.expiry-pending {
+  color: #ff9800;
+  font-weight: 500;
+}
+
+.expiry-pending em {
+  color: #999;
+  font-size: 12px;
+  font-style: italic;
+  display: block;
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(255, 152, 0, 0.1);
+  border-left: 2px solid #ff9800;
+  border-radius: 4px;
 }
 
 /* Nostr Public Key Section */
