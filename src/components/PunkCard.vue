@@ -1,5 +1,5 @@
 <template>
-  <div class="punk-card" @click="$emit('click', punk)">
+  <div class="punk-card" :class="{ 'in-escrow': inEscrow }" @click="$emit('click', punk)">
     <div class="punk-image">
       <img :src="punk.metadata.imageUrl" :alt="punk.metadata.name" />
       <div v-if="isOfficial" class="official-badge" title="Official ArkPunk - Verified on relay.damus.io">
@@ -86,6 +86,16 @@ function formatSats(sats: bigint): string {
   border-color: #ff6b35;
   transform: translateY(-4px);
   box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+}
+
+.punk-card.in-escrow {
+  opacity: 0.7;
+  border-color: #f59e0b;
+}
+
+.punk-card.in-escrow:hover {
+  opacity: 0.85;
+  border-color: #fbbf24;
 }
 
 .punk-image {

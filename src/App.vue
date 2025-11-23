@@ -798,53 +798,63 @@ async function listPunk(punk: PunkState) {
       console.log('✅ Escrow listing created')
       console.log('   Escrow address:', escrowAddress)
 
-      // Transfer punk ownership to escrow via Nostr
+      // Send punk VTXO to escrow wallet
       const transferConfirm = confirm(
         `🛡️ Escrow Listing Created!\n\n` +
-        `Now transfer ${punk.metadata.name} ownership to escrow.\n\n` +
+        `Now send ${punk.metadata.name} to the escrow wallet.\n\n` +
         `This will:\n` +
-        `• Publish a Nostr event transferring ownership to escrow\n` +
-        `• Your punk will show as "En escrow" in your gallery\n` +
+        `• Transfer your punk VTXO (~10,100 sats) to escrow\n` +
+        `• Your punk will show as "🛡️ In Escrow" in your gallery (grayed out)\n` +
         `• Once a buyer pays, the escrow will automatically:\n` +
         `  - Transfer the punk to the buyer\n` +
         `  - Send ${price.toLocaleString()} sats to you\n\n` +
-        `Ready to transfer punk to escrow?`
+        `Ready to send punk to escrow?`
       )
 
       if (!transferConfirm) {
         alert(
-          `⚠️ Listing created but punk ownership not transferred.\n\n` +
-          `The listing won't be active until you transfer ownership to escrow.`
+          `⚠️ Listing created but punk not sent to escrow.\n\n` +
+          `The listing won't be active until you send the punk to escrow.`
         )
         return
       }
 
-      // Publish Nostr event transferring punk to escrow
-      console.log('🔑 Publishing Nostr transfer event to escrow...')
+      // Get all VTXOs to find the punk VTXO value
+      console.log('📋 Finding punk VTXO...')
+      const allVtxos = await wallet.getVtxos()
+      const punkVtxo = allVtxos.find(v => `${v.txid}:${v.vout}` === punk.vtxoOutpoint)
+
+      if (!punkVtxo) {
+        alert(
+          `❌ Error: Could not find punk VTXO in your wallet.\n\n` +
+          `Outpoint: ${punk.vtxoOutpoint}\n\n` +
+          `Please refresh your punk list and try again.`
+        )
+        return
+      }
+
+      console.log(`   Found punk VTXO: ${punkVtxo.value} sats`)
+
+      // Send punk VTXO to escrow address
+      console.log(`📤 Sending punk VTXO to escrow address: ${escrowAddress}`)
 
       try {
-        // Transfer punk from seller to escrow pubkey
-        await publishPunkTransfer(
-          punk.punkId,
-          myPubkey, // from seller
-          escrowPubkey, // to escrow
-          'escrow-listing', // txid placeholder for listing action
-          privateKeyHex // seller signs the transfer
-        )
-        console.log('✅ Punk ownership transferred to escrow via Nostr!')
+        const txid = await wallet.send(escrowAddress, BigInt(punkVtxo.value))
+        console.log(`✅ Punk sent to escrow! Txid: ${txid}`)
 
         alert(
           `✅ Success!\n\n` +
-          `${punk.metadata.name} has been transferred to escrow.\n\n` +
+          `${punk.metadata.name} has been sent to escrow.\n\n` +
+          `Transaction ID: ${txid}\n\n` +
           `Your listing is now active in the marketplace!\n` +
-          `The punk will show as "🛡️ En escrow" in your gallery.\n\n` +
+          `The punk will show as "🛡️ In Escrow" (grayed out) in your gallery.\n\n` +
           `When a buyer purchases it, you'll receive ${price.toLocaleString()} sats automatically.`
         )
-      } catch (nostrError: any) {
-        console.error('❌ Failed to publish Nostr transfer:', nostrError)
+      } catch (sendError: any) {
+        console.error('❌ Failed to send punk to escrow:', sendError)
         alert(
-          `⚠️ Listing created but failed to transfer ownership via Nostr:\n\n` +
-          `${nostrError?.message || nostrError}\n\n` +
+          `⚠️ Listing created but failed to send punk to escrow:\n\n` +
+          `${sendError?.message || sendError}\n\n` +
           `Please try listing again.`
         )
         return
