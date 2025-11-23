@@ -284,7 +284,8 @@ async function loadPunks() {
         // Handle both formats: new (with metadata field) and old (metadata spread at root)
         metadata: data.metadata || data,
         listingPrice: 10000n,
-        vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`
+        vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`,
+        inEscrow: data.inEscrow || false
       }))
     }
   } catch (error) {
@@ -315,14 +316,21 @@ async function loadPunksFromLocalStorage() {
         localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks))
       }
 
-      allPunks.value = uniquePunks.map((data: any) => ({
-        punkId: data.punkId,
-        owner: data.owner || '', // Use owner from localStorage
-        // Handle both formats: new (with metadata field) and old (metadata spread at root)
-        metadata: data.metadata || data,
-        listingPrice: 10000n,
-        vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`
-      }))
+      allPunks.value = uniquePunks.map((data: any) => {
+        const punk = {
+          punkId: data.punkId,
+          owner: data.owner || '', // Use owner from localStorage
+          // Handle both formats: new (with metadata field) and old (metadata spread at root)
+          metadata: data.metadata || data,
+          listingPrice: 10000n,
+          vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`,
+          inEscrow: data.inEscrow || false
+        }
+        if (data.inEscrow) {
+          console.log(`📦 loadPunksFromLocalStorage: Loaded punk ${data.punkId.slice(0, 8)}... with inEscrow=${data.inEscrow}`)
+        }
+        return punk
+      })
     }
   } catch (error) {
     console.error('Failed to load punks from localStorage:', error)
@@ -387,6 +395,7 @@ function getOfficialIndex(punkId: string): number | undefined {
 // Check if punk is currently held in escrow
 function isPunkInEscrow(punkId: string): boolean {
   const punk = allPunks.value.find(p => p.punkId === punkId)
+  console.log(`🔍 isPunkInEscrow(${punkId.slice(0, 8)}...): punk found=${!!punk}, inEscrow=${punk?.inEscrow}`)
   return punk?.inEscrow === true
 }
 
