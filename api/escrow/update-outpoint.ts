@@ -41,6 +41,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
+    // Debug: Check if we can read the listing first
+    console.log('   📋 Checking if listing exists...')
+    const { getEscrowListing } = await import('./_lib/escrowStore.js')
+    const existingListing = await getEscrowListing(punkId)
+
+    if (!existingListing) {
+      console.error(`   ❌ Listing not found for punkId: ${punkId}`)
+      console.error(`   This means the /api/escrow/list call may have failed silently`)
+      return res.status(404).json({
+        error: 'Listing not found',
+        details: `No escrow listing found for punk ${punkId}. Please create a listing first.`,
+        punkId
+      })
+    }
+
+    console.log(`   ✅ Found existing listing with status: ${existingListing.status}`)
+
     // Update the outpoint in the escrow listing
     await updateEscrowStatus(punkId, 'deposited', {
       punkVtxoOutpoint: newVtxoOutpoint,

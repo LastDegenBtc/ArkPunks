@@ -59,34 +59,60 @@ const BLOB_FILENAME = 'escrow-listings.json'
  */
 async function readStore(): Promise<EscrowStore> {
   try {
+    console.log('📋 Reading escrow store from Vercel Blob...')
+
     // List all blobs to find our store
     const { blobs } = await list()
+    console.log(`   Found ${blobs.length} blob(s) total`)
+
     const storeBlob = blobs.find(b => b.pathname === BLOB_FILENAME)
 
     if (!storeBlob) {
-      // No store exists yet, return empty
-      console.log('📋 No blob found, returning empty store')
+      // No store exists yet, return empty (this is OK for first run)
+      console.log('📋 No blob found, returning empty store (this is OK for first listing)')
       return { listings: {}, lastUpdated: Date.now() }
     }
 
+    console.log(`   Found escrow store blob: ${storeBlob.pathname}`)
+
     // Fetch the blob content
     const response = await fetch(storeBlob.url)
+    if (!response.ok) {
+      throw new Error(`Blob fetch failed: ${response.status} ${response.statusText}`)
+    }
+
     const text = await response.text()
+    console.log(`   Blob size: ${text.length} bytes`)
 
     // Check if we got HTML error page instead of JSON
     if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
       console.error('❌ Blob returned HTML instead of JSON - blob may be corrupted')
-      console.error('   This is a critical error that will cause data loss!')
-      console.error('   Returning empty store to prevent overwrites')
       throw new Error('Blob returned HTML instead of JSON')
     }
 
     const store: EscrowStore = JSON.parse(text)
-    console.log(`📋 Loaded blob with ${Object.keys(store.listings).length} listings`)
+    console.log(`📋 Loaded blob with ${Object.keys(store.listings).length} listing(s)`)
+
+    // List all punk IDs for debugging
+    if (Object.keys(store.listings).length > 0) {
+      console.log(`   Listings: ${Object.keys(store.listings).map(id => id.slice(0, 8) + '...').join(', ')}`)
+    }
+
     return store
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ CRITICAL: Failed to read blob store:', error)
-    console.error('   Returning empty store - THIS WILL CAUSE DATA LOSS IF WRITTEN!')
+    console.error('   Error name:', error.name)
+    console.error('   Error message:', error.message)
+
+    // Check if this is a Vercel Blob configuration error
+    if (error.message?.includes('BLOB_READ_WRITE_TOKEN')) {
+      console.error('   ⚠️  BLOB_READ_WRITE_TOKEN environment variable not set!')
+      console.error('   ⚠️  Configure this in Vercel project settings')
+      throw new Error('Vercel Blob not configured: BLOB_READ_WRITE_TOKEN missing')
+    }
+
+    // For other errors, return empty store but log loudly
+    console.error('   ⚠️  Returning empty store - if this persists, listings will be lost!')
     return { listings: {}, lastUpdated: Date.now() }
   }
 }
@@ -95,14 +121,33 @@ async function readStore(): Promise<EscrowStore> {
  * Write all listings to Vercel Blob
  */
 async function writeStore(store: EscrowStore): Promise<void> {
-  store.lastUpdated = Date.now()
+  try {
+    store.lastUpdated = Date.now()
 
-  await put(BLOB_FILENAME, JSON.stringify(store, null, 2), {
-    access: 'public',
-    contentType: 'application/json',
-    addRandomSuffix: false,
-    allowOverwrite: true
-  })
+    console.log(`💾 Writing escrow store with ${Object.keys(store.listings).length} listing(s)...`)
+
+    const result = await put(BLOB_FILENAME, JSON.stringify(store, null, 2), {
+      access: 'public',
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      allowOverwrite: true
+    })
+
+    console.log(`✅ Blob written successfully: ${result.url}`)
+  } catch (error: any) {
+    console.error('❌ CRITICAL: Failed to write blob store:', error)
+    console.error('   Error name:', error.name)
+    console.error('   Error message:', error.message)
+
+    // Check if this is a Vercel Blob configuration error
+    if (error.message?.includes('BLOB_READ_WRITE_TOKEN')) {
+      console.error('   ⚠️  BLOB_READ_WRITE_TOKEN environment variable not set!')
+      console.error('   ⚠️  Configure this in Vercel project settings')
+      throw new Error('Vercel Blob not configured: BLOB_READ_WRITE_TOKEN missing')
+    }
+
+    throw error
+  }
 }
 
 /**
