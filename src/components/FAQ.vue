@@ -7,7 +7,6 @@
       <div class="faq-category">
         <h3>🚀 Getting Started</h3>
 
-
         <div class="faq-item">
           <button class="faq-question" @click="toggle('what-is-arkpunks')">
             <span>What is ArkPunks?</span>
