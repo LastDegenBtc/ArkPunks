@@ -57,12 +57,12 @@ export interface BuyPunkResponse {
 export interface ExecuteSwapRequest {
   punkId: string
   buyerPubkey: string
+  buyerArkAddress: string
 }
 
 export interface ExecuteSwapResponse {
   success: boolean
   punkId: string
-  punkTxid: string
   paymentTxid: string
   message: string
 }

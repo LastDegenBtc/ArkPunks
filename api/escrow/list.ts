@@ -1,18 +1,16 @@
 /**
- * Escrow Listing API
+ * Simplified Escrow Listing API
  *
  * POST /api/escrow/list
  *
- * Allows a seller to list their punk in escrow mode.
- * Returns the escrow address where the seller must send punk collateral (~10k sats).
- *
- * DESIGN NOTE: VTXOs are fungible collateral, not tied to specific punks.
- * Punk ownership is tracked by Nostr events. VTXOs just prove 10k sats are locked.
+ * Creates a marketplace listing immediately (no VTXO deposit needed).
+ * Seller keeps their punk until a buyer purchases it.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getEscrowAddress } from './_lib/escrowWallet.js'
-import { createEscrowListing } from './_lib/escrowStore.js'
+import { createEscrowListing, getEscrowListing } from './_lib/escrowStore.js'
+import { getPunkOwner, setPunkOwner } from '../ownership/_lib/ownershipStore.js'
 
 interface ListRequest {
   punkId: string
@@ -24,10 +22,7 @@ interface ListRequest {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  console.log('🔵 Escrow list endpoint called')
-  console.log('   Method:', req.method)
-  console.log('   Env ESCROW_WALLET_ADDRESS:', process.env.ESCROW_WALLET_ADDRESS ? 'SET' : 'NOT SET')
-  console.log('   Env ESCROW_WALLET_PRIVATE_KEY:', process.env.ESCROW_WALLET_PRIVATE_KEY ? 'SET' : 'NOT SET')
+  console.log('🔵 Simplified escrow list endpoint called')
 
   // Only allow POST
   if (req.method !== 'POST') {
@@ -44,54 +39,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       compressedMetadata
     } = req.body as ListRequest
 
-    console.log('   Received listing request for punk:', punkId)
+    console.log(`   Listing punk ${punkId.slice(0, 8)}... for ${price} sats`)
+    console.log(`   Seller: ${sellerArkAddress.slice(0, 20)}...`)
 
     // Validate required fields
-    if (!punkId || !sellerPubkey || !sellerArkAddress || !price || !punkVtxoOutpoint) {
+    if (!punkId || !sellerPubkey || !sellerArkAddress || !price) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['punkId', 'sellerPubkey', 'sellerArkAddress', 'price', 'punkVtxoOutpoint']
+        required: ['punkId', 'sellerPubkey', 'sellerArkAddress', 'price']
       })
     }
 
-    // Get escrow wallet address
+    // Check if already listed
+    const existingListing = await getEscrowListing(punkId)
+    if (existingListing && existingListing.status === 'pending') {
+      console.log('   ⚠️ Punk already listed')
+      return res.status(400).json({
+        error: 'Punk already listed',
+        listing: existingListing
+      })
+    }
+
+    // Verify ownership (if ownership table has data)
+    const currentOwner = await getPunkOwner(punkId)
+    if (currentOwner && currentOwner !== sellerArkAddress) {
+      console.error(`   ❌ Ownership mismatch: expected ${currentOwner}, got ${sellerArkAddress}`)
+      return res.status(403).json({
+        error: 'You do not own this punk',
+        actualOwner: currentOwner
+      })
+    }
+
+    // If ownership table is empty for this punk, initialize it
+    if (!currentOwner) {
+      console.log(`   📝 Initializing ownership: ${punkId.slice(0, 8)}... → ${sellerArkAddress.slice(0, 20)}...`)
+      await setPunkOwner(punkId, sellerArkAddress)
+    }
+
     const escrowAddress = getEscrowAddress()
 
-    // Create escrow listing
+    // Create listing immediately (no deposit needed)
     await createEscrowListing({
       punkId,
       sellerPubkey,
       sellerArkAddress,
       price,
-      punkVtxoOutpoint,
+      punkVtxoOutpoint: punkVtxoOutpoint || 'unknown',
       escrowAddress,
-      compressedMetadata, // Store metadata for fast buyer recovery
-      status: 'pending',
+      compressedMetadata,
+      status: 'pending', // Active immediately
       createdAt: Date.now()
     })
 
-    console.log(`✅ Created escrow listing for punk ${punkId}`)
-    console.log(`   Price: ${price} sats`)
-    console.log(`   Seller must send punk VTXO to: ${escrowAddress}`)
+    console.log(`✅ Listing created and active immediately`)
 
-    // Return escrow address to seller
     return res.status(200).json({
       success: true,
       punkId,
       escrowAddress,
       price,
-      message: 'Please send your punk VTXO to the escrow address',
-      instructions: [
-        `1. Send your punk VTXO (${punkVtxoOutpoint}) to ${escrowAddress}`,
-        '2. Once received, your punk will appear on the marketplace',
-        '3. When sold, you will receive payment automatically (minus 1% fee)'
-      ]
+      message: 'Punk listed successfully'
     })
 
   } catch (error: any) {
-    console.error('❌ Error creating escrow listing:', error)
+    console.error('❌ Error creating listing:', error)
     return res.status(500).json({
-      error: 'Failed to create escrow listing',
+      error: 'Failed to create listing',
       details: error.message
     })
   }

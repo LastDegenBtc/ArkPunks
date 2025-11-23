@@ -1,38 +1,37 @@
 /**
- * Escrow Execute API
+ * Simplified Escrow Execute API
  *
  * POST /api/escrow/execute
  *
- * Executes the atomic swap for an escrow listing.
- * This is triggered by the buyer after sending payment.
- *
- * Steps:
- * 1. Verify both deposits received (punk VTXO + payment)
- * 2. Transfer punk to buyer
- * 3. Transfer payment (minus 1% fee) to seller
+ * Executes purchase in simplified escrow mode:
+ * 1. Verify buyer payment received
+ * 2. Update ownership table (punk → buyer)
+ * 3. Send payment to seller (minus 1% fee)
  * 4. Mark listing as sold
+ *
+ * Seller is responsible for sending punk VTXO to buyer via UI.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getEscrowListing, updateEscrowStatus, ESCROW_PRIVATE_KEY } from './_lib/escrowStore.js'
+import { getEscrowListing, updateEscrowStatus } from './_lib/escrowStore.js'
 import { getEscrowWallet } from './_lib/escrowArkadeWallet.js'
+import { setPunkOwner } from '../ownership/_lib/ownershipStore.js'
 
 interface ExecuteRequest {
   punkId: string
-  buyerPubkey: string // For verification
+  buyerPubkey: string
+  buyerArkAddress: string
 }
 
 interface ExecuteResponse {
   success: boolean
   punkId: string
-  punkTxid: string // Transaction ID for punk transfer to buyer
-  paymentTxid: string // Transaction ID for payment to seller
+  paymentTxid: string
   message: string
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  console.log('⚡ Escrow execute endpoint called')
-  console.log('   Method:', req.method)
+  console.log('⚡ Simplified escrow execute endpoint called')
 
   // Only allow POST
   if (req.method !== 'POST') {
@@ -40,40 +39,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { punkId, buyerPubkey } = req.body as ExecuteRequest
+    const { punkId, buyerPubkey, buyerArkAddress } = req.body as ExecuteRequest
 
-    console.log('   Execute request for punk:', punkId)
-    console.log('   Buyer:', buyerPubkey?.slice(0, 16) + '...')
+    console.log(`   Purchase: punk ${punkId.slice(0, 8)}...`)
+    console.log(`   Buyer: ${buyerArkAddress?.slice(0, 20)}...`)
 
     // Validate required fields
-    if (!punkId || !buyerPubkey) {
+    if (!punkId || !buyerPubkey || !buyerArkAddress) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['punkId', 'buyerPubkey']
+        required: ['punkId', 'buyerPubkey', 'buyerArkAddress']
       })
     }
 
-    // Get escrow listing
+    // Get listing
     const listing = await getEscrowListing(punkId)
     if (!listing) {
-      return res.status(404).json({ error: 'Punk not found in escrow' })
-    }
-
-    // Debug: Log full buyer verification details
-    console.log('🔍 BUYER VERIFICATION:')
-    console.log('   Request buyerPubkey:', buyerPubkey)
-    console.log('   Stored buyerPubkey:', listing.buyerPubkey)
-    console.log('   Match:', listing.buyerPubkey === buyerPubkey)
-
-    // Verify buyer matches
-    if (listing.buyerPubkey !== buyerPubkey) {
-      return res.status(403).json({
-        error: 'Not authorized - buyer mismatch',
-        debug: {
-          requestPubkey: buyerPubkey,
-          storedPubkey: listing.buyerPubkey
-        }
-      })
+      return res.status(404).json({ error: 'Listing not found' })
     }
 
     // Check listing status
@@ -85,173 +67,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(410).json({ error: 'Listing cancelled' })
     }
 
-    console.log('✅ Buyer verified, checking deposits...')
-    console.log('   Escrow address:', listing.escrowAddress)
-    console.log('   Seller address:', listing.sellerArkAddress)
-    console.log('   Buyer address:', listing.buyerAddress)
+    console.log('✅ Listing found, verifying payment...')
 
     // Calculate amounts
     const FEE_PERCENT = 1
     const price = BigInt(listing.price)
-    const fee = (price * BigInt(Math.floor(FEE_PERCENT * 100))) / 10000n
-    const totalExpected = price + fee // What buyer should have sent
+    const fee = (price * BigInt(FEE_PERCENT)) / 100n
+    const sellerReceives = price - fee // Seller gets price minus fee
 
     console.log(`   Price: ${price} sats`)
     console.log(`   Fee (${FEE_PERCENT}%): ${fee} sats`)
-    console.log(`   Total expected from buyer: ${totalExpected} sats`)
-    console.log(`   Seller will receive: ${price} sats (full price)`)
-
-    // Execute atomic swap using Arkade SDK
-    console.log('⚡ Executing atomic swap with Arkade SDK...')
+    console.log(`   Seller receives: ${sellerReceives} sats`)
 
     // Initialize escrow wallet
+    console.log('📦 Checking escrow wallet...')
     const escrowWallet = await getEscrowWallet()
-    console.log('✅ Escrow wallet initialized')
-    console.log('   Escrow address:', escrowWallet.arkadeAddress)
-
-    // Check escrow balance
     const escrowBalance = await escrowWallet.getBalance()
-    console.log('   Escrow balance:', escrowBalance.available.toString(), 'sats')
+    console.log(`   Escrow balance: ${escrowBalance.available} sats`)
 
-    // Verify buyer sent enough funds (price + fee)
-    // Note: We expect buyer sent price + fee, and seller already transferred punk ownership via Nostr
+    // Verify buyer sent payment
     if (escrowBalance.available < price) {
-      throw new Error(
-        `Insufficient escrow balance for seller payment. Need ${price} sats, have ${escrowBalance.available} sats. ` +
-        `Buyer must send ${totalExpected} sats (price + ${FEE_PERCENT}% fee) to escrow.`
-      )
+      return res.status(400).json({
+        error: 'Payment not received',
+        details: `Expected ${price} sats, escrow has ${escrowBalance.available} sats`,
+        message: 'Please send payment to escrow address first'
+      })
     }
 
-    // Transfer: Send full price to seller (fee stays in escrow)
-    console.log(`💸 Transferring ${price} sats to seller: ${listing.sellerArkAddress}`)
-    const paymentTxid = await escrowWallet.send(listing.sellerArkAddress, price)
-    console.log(`✅ Payment sent to seller! Txid: ${paymentTxid}`)
-    console.log(`   Fee (${fee} sats) remains in escrow wallet`)
+    console.log('✅ Payment verified')
 
-    // Publish Nostr event transferring punk ownership from escrow to buyer
-    console.log(`🔑 Publishing Nostr event: Transferring punk ${listing.punkId} to buyer...`)
-    const { ESCROW_PRIVATE_KEY, ESCROW_PUBKEY } = await import('./_lib/escrowStore.js')
+    // Step 1: Update ownership table (punk → buyer)
+    console.log(`📝 Updating ownership: ${punkId.slice(0, 8)}... → ${buyerArkAddress.slice(0, 20)}...`)
+    await setPunkOwner(punkId, buyerArkAddress)
+    console.log('✅ Ownership updated')
 
-    try {
-      // Import Nostr tools dynamically
-      const { SimplePool, finalizeEvent } = await import('nostr-tools')
-      const { hex } = await import('@scure/base')
+    // Step 2: Send payment to seller
+    console.log(`💸 Sending ${sellerReceives} sats to seller: ${listing.sellerArkAddress.slice(0, 20)}...`)
+    const paymentTxid = await escrowWallet.send(listing.sellerArkAddress, sellerReceives)
+    console.log(`✅ Payment sent! Txid: ${paymentTxid}`)
+    console.log(`   Fee (${fee} sats) remains in escrow`)
 
-      const RELAYS = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://nostr.wine',
-        'wss://relay.snort.social'
-      ]
-      const KIND_PUNK_TRANSFER = 1403  // Must match frontend constant
+    // Step 3: Mark listing as sold
+    console.log('📝 Updating listing status...')
+    await updateEscrowStatus(punkId, 'sold', {
+      soldAt: Date.now(),
+      buyerAddress: buyerArkAddress,
+      buyerPubkey,
+      paymentTransferTxid: paymentTxid
+    })
+    console.log('✅ Listing marked as sold')
 
-      // Determine network (default mainnet)
-      const currentNetwork = process.env.VITE_ARKADE_NETWORK || 'mainnet'
-
-      const eventTemplate = {
-        kind: KIND_PUNK_TRANSFER,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['t', 'arkade-punk-transfer'],
-          ['punk_id', listing.punkId],
-          ['from', ESCROW_PUBKEY],
-          ['to', listing.buyerPubkey!],
-          ['txid', paymentTxid],
-          ['network', currentNetwork]
-        ],
-        content: `Punk ${listing.punkId} transferred from escrow to ${listing.buyerPubkey!.slice(0, 8)}...`
-      }
-
-      const signedEvent = finalizeEvent(eventTemplate, hex.decode(ESCROW_PRIVATE_KEY))
-
-      const pool = new SimplePool()
-      await Promise.any(pool.publish(RELAYS, signedEvent))
-      pool.close(RELAYS)
-
-      console.log(`✅ Punk ownership transferred to buyer via Nostr!`)
-    } catch (nostrError: any) {
-      console.error('⚠️ Failed to publish Nostr transfer event:', nostrError)
-      // Don't fail the whole transaction if Nostr fails, but log it
-      // The payment already went through, so we should mark as sold anyway
-    }
-
-    console.log('✅ Atomic swap completed successfully!')
-
-    // Run blob update and Nostr publish in parallel for speed
-    const [_, __] = await Promise.allSettled([
-      // Update listing status in blob
-      updateEscrowStatus(punkId, 'sold', {
-        soldAt: Date.now(),
-        punkTransferTxid: 'nostr', // Punk transferred via Nostr event
-        paymentTransferTxid: paymentTxid
-      }),
-
-      // Publish KIND_PUNK_SOLD event to Nostr (parallel!)
-      (async () => {
-        console.log(`📝 Publishing sold event for ${listing.punkId}...`)
-        try {
-      const { SimplePool, finalizeEvent } = await import('nostr-tools')
-      const { hex } = await import('@scure/base')
-
-      const RELAYS = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://nostr.wine',
-        'wss://relay.snort.social'
-      ]
-      const KIND_PUNK_LISTING = 1401
-      const KIND_PUNK_SOLD = 1402  // Must match frontend constant
-
-      const currentNetwork = process.env.VITE_ARKADE_NETWORK || 'mainnet'
-
-      // Get compressed metadata from blob (fast!) instead of querying Nostr
-      const compressedMetadata = listing.compressedMetadata || ''
-
-      if (compressedMetadata) {
-        console.log(`   ✅ Using metadata from blob (${compressedMetadata.length} chars) - no Nostr query needed!`)
-      } else {
-        console.warn(`   ⚠️  No metadata in blob - buyer will need to search for mint event (slower)`)
-      }
-
-      const soldEventTemplate = {
-        kind: KIND_PUNK_SOLD,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['t', 'arkade-punk-sold'],
-          ['punk_id', listing.punkId],
-          ['seller', listing.sellerPubkey],
-          ['buyer', listing.buyerPubkey!],
-          ['price', listing.price],
-          ['txid', paymentTxid],
-          ['network', currentNetwork],
-          ...(compressedMetadata ? [['compressed', compressedMetadata]] : [])
-        ],
-        content: `Punk ${listing.punkId} sold via escrow for ${listing.price} sats`
-      }
-
-      const signedSoldEvent = finalizeEvent(soldEventTemplate, hex.decode(ESCROW_PRIVATE_KEY))
-
-      await Promise.any(pool.publish(RELAYS, signedSoldEvent))
-      pool.close(RELAYS)
-
-          console.log(`✅ Sold event published to Nostr!${compressedMetadata ? ' (with metadata)' : ' (without metadata)'}`)
-        } catch (soldEventError: any) {
-          console.error('⚠️ Failed to publish sold event:', soldEventError)
-          // Don't fail the whole transaction if Nostr fails
-        }
-      })()
-    ])
-
-    console.log('✅ Blob and Nostr updates completed (parallel)')
-
-    console.log('✅ Escrow execution completed')
+    console.log('✅ Purchase completed successfully!')
+    console.log(`   ℹ️  Seller must manually send punk VTXO to buyer: ${buyerArkAddress}`)
 
     const response: ExecuteResponse = {
       success: true,
       punkId,
-      punkTxid: 'nostr', // Punk transferred via Nostr event, not on-chain
       paymentTxid,
-      message: 'Atomic swap executed successfully - Punk transferred via Nostr, payment sent to seller'
+      message: `Purchase complete! Seller must send punk to ${buyerArkAddress.slice(0, 20)}...`
     }
 
     return res.status(200).json(response)
