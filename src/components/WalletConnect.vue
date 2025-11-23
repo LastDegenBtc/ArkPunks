@@ -138,7 +138,7 @@
         </div>
 
         <!-- Marketplace reserve info (over-minting bug) -->
-        <div v-if="marketplaceInfo.hasDeficit" class="detail-row reserve-info-warning">
+        <div v-if="marketplaceInfo.hasDeficit || marketplaceInfo.canLock" class="detail-row reserve-info-warning">
           <div class="reserve-info-header">
             <span class="label">⚠️ Marketplace Reserve</span>
           </div>
@@ -147,15 +147,35 @@
               You have <strong>{{ marketplaceInfo.totalPunks }} punk{{ marketplaceInfo.totalPunks > 1 ? 's' : '' }}</strong>
               but can only list <strong>{{ marketplaceInfo.sellablePunks }}</strong> on the marketplace.
             </p>
-            <p class="info-text">
-              <strong>Why?</strong> Each punk requires 10,000 sats reserve.<br>
-              Your balance: {{ formatSats(balance.total) }} sats<br>
-              Required: {{ formatSats(marketplaceInfo.requiredReserve) }} sats<br>
-              <strong>Missing: {{ formatSats(marketplaceInfo.deficit) }} sats</strong>
-            </p>
-            <p class="info-action">
-              💡 <strong>To list more punks:</strong> Receive {{ formatSats(marketplaceInfo.deficit) }} sats via Lightning or on-chain
-            </p>
+
+            <!-- Case 1: Not enough sats total -->
+            <template v-if="marketplaceInfo.hasDeficit">
+              <p class="info-text">
+                <strong>Why?</strong> Each punk requires 10,000 sats reserve for UTXO manipulation.<br>
+                Your balance: {{ formatSats(balance.total) }} sats<br>
+                Required: {{ formatSats(marketplaceInfo.requiredReserve) }} sats<br>
+                <strong>Missing: {{ formatSats(marketplaceInfo.deficit) }} sats</strong>
+              </p>
+              <p class="info-action">
+                💡 <strong>To list more punks:</strong> Receive {{ formatSats(marketplaceInfo.deficit) }} sats via Lightning or on-chain.
+              </p>
+            </template>
+
+            <!-- Case 2: Enough sats but need to lock -->
+            <template v-else-if="marketplaceInfo.canLock">
+              <p class="info-text">
+                <strong>Why?</strong> Each punk requires 10,000 sats reserve for UTXO manipulation.<br>
+                Your balance: {{ formatSats(balance.total) }} sats<br>
+                Required: {{ formatSats(marketplaceInfo.requiredReserve) }} sats<br>
+                <strong>✅ You have enough sats!</strong>
+              </p>
+              <p class="info-action">
+                💡 <strong>Click below to lock your sats and enable marketplace listing for all your punks.</strong>
+              </p>
+              <button @click="syncPunkReserve" class="btn-sync-reserve" :disabled="syncing">
+                {{ syncing ? 'Locking...' : '🔒 Lock Missing Sats for Listing' }}
+              </button>
+            </template>
           </div>
         </div>
 
@@ -164,6 +184,23 @@
           <span class="value">
             {{ formatSats(balance.recoverable) }} sats
           </span>
+        </div>
+
+        <!-- Troubleshooting section -->
+        <div class="detail-row troubleshooting-section">
+          <div class="troubleshooting-header" @click="showTroubleshooting = !showTroubleshooting">
+            <span class="label">🔧 Troubleshooting</span>
+            <span class="toggle-icon">{{ showTroubleshooting ? '▼' : '▶' }}</span>
+          </div>
+          <div v-if="showTroubleshooting" class="troubleshooting-content">
+            <p class="info-text">
+              If you're getting <strong>VTXO_RECOVERABLE</strong> errors when minting:<br>
+              Your VTXOs may have expired and need to be recovered.
+            </p>
+            <button @click="recoverExpiredVtxos" class="btn-recover" :disabled="recovering">
+              {{ recovering ? 'Recovering...' : '🔄 Recover Expired VTXOs' }}
+            </button>
+          </div>
         </div>
 
         <div class="detail-row">
@@ -447,6 +484,9 @@ const balance = ref<WalletBalance>({
 const vtxoCount = ref(0)
 const vtxos = ref<VtxoInput[]>([]) // Store VTXOs to calculate punk-locked balance
 const punkBalanceTrigger = ref(0) // Reactive trigger to force punkLockedBalance recalculation
+const syncing = ref(false) // Reserve sync in progress
+const recovering = ref(false) // VTXO recovery in progress
+const showTroubleshooting = ref(false) // Show troubleshooting section
 
 // Lightning state
 const lightningTab = ref<'receive' | 'send'>('receive')
@@ -559,6 +599,7 @@ const marketplaceInfo = computed(() => {
 
   const defaultInfo = {
     hasDeficit: false,
+    canLock: false,
     totalPunks: 0,
     sellablePunks: 0,
     requiredReserve: 0n,
@@ -591,7 +632,8 @@ const marketplaceInfo = computed(() => {
     const deficit = requiredReserve - balance.value.total
 
     return {
-      hasDeficit: deficit > 0n,
+      hasDeficit: deficit > 0n, // Not enough sats total
+      canLock: deficit <= 0n && sellablePunks < totalPunks, // Enough sats but need to lock
       totalPunks,
       sellablePunks: Math.max(0, sellablePunks),
       requiredReserve,
@@ -953,6 +995,112 @@ async function copyBoardingAddress() {
     alert('⚡ Boarding address copied! Use this for on-chain funding.')
   } catch {
     console.error('Failed to copy boarding address')
+  }
+}
+
+async function syncPunkReserve() {
+  syncing.value = true
+
+  try {
+    console.log('🔄 Syncing punk reserve...')
+
+    // Step 1: Refresh balance from wallet
+    await refreshBalance()
+    console.log(`   Current balance: ${balance.value.total} sats`)
+
+    // Step 2: Force recalculation of punk locked balance
+    punkBalanceTrigger.value++
+    await nextTick() // Wait for computed to update
+
+    // Step 3: Check if reserve is now sufficient
+    const punksJson = localStorage.getItem('arkade_punks')
+    if (!punksJson) {
+      alert('✅ No punks found - nothing to lock!')
+      return
+    }
+
+    const punks = JSON.parse(punksJson)
+    const ownedPunks = punks.filter((p: any) =>
+      p.owner === walletAddress.value && !p.inEscrow
+    )
+
+    if (ownedPunks.length === 0) {
+      alert('✅ No punks to lock - all good!')
+      return
+    }
+
+    const PUNK_VALUE = 10000n
+    const requiredReserve = BigInt(ownedPunks.length) * PUNK_VALUE
+    const currentBalance = balance.value.total
+    const deficit = requiredReserve - currentBalance
+
+    console.log(`   Punks owned: ${ownedPunks.length}`)
+    console.log(`   Required reserve: ${requiredReserve} sats`)
+    console.log(`   Deficit: ${deficit} sats`)
+
+    if (deficit <= 0n) {
+      // Success! User has enough
+      const sellablePunks = Number(currentBalance / PUNK_VALUE)
+      alert(
+        `🔒 Sats Locked Successfully!\n\n` +
+        `You have ${ownedPunks.length} punk${ownedPunks.length > 1 ? 's' : ''}\n` +
+        `Balance: ${formatSats(currentBalance)} sats\n` +
+        `Required: ${formatSats(requiredReserve)} sats\n\n` +
+        `✅ Reserve locked for UTXO manipulation!\n` +
+        `You can now list all ${sellablePunks} punk${sellablePunks > 1 ? 's' : ''} on the marketplace.`
+      )
+    } else {
+      // Still not enough
+      alert(
+        `⚠️ Still Missing Sats\n\n` +
+        `You have ${ownedPunks.length} punk${ownedPunks.length > 1 ? 's' : ''}\n` +
+        `Balance: ${formatSats(currentBalance)} sats\n` +
+        `Required: ${formatSats(requiredReserve)} sats\n\n` +
+        `❌ Still missing: ${formatSats(deficit)} sats\n\n` +
+        `Receive more sats via Lightning or on-chain, then sync again.`
+      )
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to sync punk reserve:', error)
+    alert(`Failed to sync reserve:\n\n${error.message}`)
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function recoverExpiredVtxos() {
+  if (!wallet) {
+    alert('Please connect your wallet first')
+    return
+  }
+
+  recovering.value = true
+
+  try {
+    console.log('🔄 Recovering expired VTXOs...')
+
+    // Call the wallet's recover method
+    const result = await wallet.recover()
+
+    console.log('✅ Recovery result:', result)
+
+    // Refresh wallet info
+    await refreshBalance()
+
+    alert(
+      `✅ VTXOs Recovered Successfully!\n\n` +
+      `Your expired VTXOs have been recovered and are now usable.\n` +
+      `You can now mint punks or send sats normally.`
+    )
+  } catch (error: any) {
+    console.error('❌ Failed to recover VTXOs:', error)
+    alert(
+      `Failed to recover VTXOs:\n\n` +
+      `${error.message}\n\n` +
+      `Please try again or contact support if the issue persists.`
+    )
+  } finally {
+    recovering.value = false
   }
 }
 
@@ -1768,6 +1916,127 @@ h3 {
 
 .reserve-info-content .info-action strong {
   color: #818cf8;
+  font-weight: 600;
+}
+
+.btn-sync-reserve {
+  padding: 10px 16px;
+  background: #6366f1;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.btn-sync-reserve:hover:not(:disabled) {
+  background: #818cf8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-sync-reserve:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Recoverable VTXOs Section */
+.recoverable-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.recoverable-info .info-text {
+  color: #ddd;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.recoverable-info .info-text strong {
+  color: #ff9800;
+  font-weight: 600;
+}
+
+.btn-recover {
+  padding: 10px 16px;
+  background: #ff9800;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.btn-recover:hover:not(:disabled) {
+  background: #fb8c00;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
+}
+
+.btn-recover:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Troubleshooting Section */
+.troubleshooting-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px;
+  background: rgba(68, 68, 68, 0.3);
+  border-radius: 6px;
+  border: 1px solid #444;
+}
+
+.troubleshooting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.troubleshooting-header:hover {
+  opacity: 0.8;
+}
+
+.troubleshooting-header .label {
+  font-weight: 600;
+  color: #aaa;
+}
+
+.troubleshooting-header .toggle-icon {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.troubleshooting-content {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #444;
+}
+
+.troubleshooting-content .info-text {
+  color: #ddd;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 12px 0;
+}
+
+.troubleshooting-content .info-text strong {
+  color: #ff9800;
   font-weight: 600;
 }
 
