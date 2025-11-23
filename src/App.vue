@@ -770,6 +770,45 @@ async function listPunk(punk: PunkState) {
     return
   }
 
+  // Check marketplace reserve requirement
+  try {
+    const balance = await wallet.getBalance()
+    const punksJson = localStorage.getItem('arkade_punks')
+    const punks = punksJson ? JSON.parse(punksJson) : []
+
+    // Count punks owned by this wallet (exclude escrowed)
+    const ownedPunks = punks.filter((p: any) =>
+      p.owner === wallet.address && !p.inEscrow
+    )
+
+    // Calculate how many punks can be listed
+    const PUNK_VALUE = 10000n
+    const sellablePunks = Number(balance.total / PUNK_VALUE)
+
+    // Count punks already in escrow
+    const punksInEscrow = punks.filter((p: any) =>
+      p.owner === wallet.address && p.inEscrow
+    ).length
+
+    // Check if user can list more
+    if (punksInEscrow >= sellablePunks) {
+      const deficit = (BigInt(ownedPunks.length) * PUNK_VALUE) - balance.total
+      alert(
+        `❌ Marketplace Reserve Limit\n\n` +
+        `You have ${ownedPunks.length} punks but can only list ${sellablePunks} on the marketplace.\n\n` +
+        `Why? Each punk requires 10,000 sats reserve.\n` +
+        `Your balance: ${balance.total.toLocaleString()} sats\n` +
+        `Required for all punks: ${(BigInt(ownedPunks.length) * PUNK_VALUE).toLocaleString()} sats\n` +
+        `Missing: ${deficit.toLocaleString()} sats\n\n` +
+        `💡 To list more punks, receive ${deficit.toLocaleString()} sats via Lightning or on-chain.`
+      )
+      return
+    }
+  } catch (error) {
+    console.error('Failed to check marketplace reserve:', error)
+    // Continue anyway if check fails
+  }
+
   // Ask for sale mode
   const modeChoice = confirm(
     '🛡️ Choose Sale Mode:\n\n' +
