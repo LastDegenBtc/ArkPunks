@@ -575,6 +575,25 @@ async function delistPunkFromMarket(punk: PunkState) {
 
     console.log('🗑️ Delisting punk from marketplace...')
 
+    // If punk is in escrow, cancel escrow listing first to return collateral
+    if (punk.inEscrow) {
+      console.log('📦 Punk is in escrow, cancelling escrow listing...')
+      try {
+        const { cancelEscrowListing } = await import('./utils/escrowApi')
+        const arkAddress = wallet.arkadeAddress || ''
+
+        await cancelEscrowListing(punk.punkId, myPubkey, arkAddress)
+        console.log('✅ Escrow cancelled, collateral returned')
+      } catch (escrowError: any) {
+        console.error('❌ Failed to cancel escrow:', escrowError)
+        alert(
+          `⚠️ Failed to return collateral from escrow:\n\n${escrowError.message}\n\n` +
+          `The punk will be delisted from Nostr, but you may need to contact support to retrieve your collateral.`
+        )
+        // Continue with delist anyway
+      }
+    }
+
     // Publish delist event to Nostr
     const success = await delistPunk(punk.punkId, privateKeyHex)
 
@@ -584,6 +603,17 @@ async function delistPunkFromMarket(punk: PunkState) {
 
       // Update local state
       listedPunkIds.value.delete(punk.punkId)
+
+      // Clear escrow flag if was in escrow
+      if (punk.inEscrow) {
+        const punkIndex = punks.value.findIndex(p => p.punkId === punk.punkId)
+        if (punkIndex !== -1) {
+          punks.value[punkIndex].inEscrow = false
+          punks.value[punkIndex].listingPrice = 0n
+          savePunksToLocalStorage()
+          console.log(`✅ Cleared escrow flag for punk ${punk.punkId.slice(0, 8)}...`)
+        }
+      }
     } else {
       alert('❌ Failed to delist punk. Check console for details.')
     }
@@ -912,6 +942,17 @@ async function listPunk(punk: PunkState) {
 
       // Update local state
       listedPunkIds.value.add(punk.punkId)
+
+      // If escrow mode, mark punk as in escrow
+      if (saleMode === 'escrow') {
+        const punkIndex = punks.value.findIndex(p => p.punkId === punk.punkId)
+        if (punkIndex !== -1) {
+          punks.value[punkIndex].inEscrow = true
+          punks.value[punkIndex].listingPrice = BigInt(price)
+          savePunksToLocalStorage()
+          console.log(`✅ Marked punk ${punk.punkId.slice(0, 8)}... as in escrow`)
+        }
+      }
     } else {
       alert('❌ Failed to list punk. Check console for details.')
     }

@@ -488,14 +488,21 @@ const punkLockedBalance = computed(() => {
     if (!Array.isArray(punks) || punks.length === 0) return 0n
 
     // Filter punks owned by this wallet
-    const ownedPunks = punks.filter((punk: any) => punk.owner === walletAddress.value)
+    // IMPORTANT: Exclude punks in escrow - their VTXOs are in escrow wallet, not ours
+    const ownedPunks = punks.filter((punk: any) =>
+      punk.owner === walletAddress.value && !punk.inEscrow
+    )
 
     // Each punk represents 10,000 sats of locked value
     const PUNK_VALUE = 10000n
     const locked = BigInt(ownedPunks.length) * PUNK_VALUE
 
+    const totalOwned = punks.filter((punk: any) => punk.owner === walletAddress.value).length
+    const inEscrowCount = totalOwned - ownedPunks.length
+
     console.log('🔍 Punk-locked balance calculation:')
-    console.log(`   Total punks owned: ${ownedPunks.length}`)
+    console.log(`   Total punks owned: ${totalOwned} (${inEscrowCount} in escrow)`)
+    console.log(`   Punks in wallet: ${ownedPunks.length}`)
     console.log(`   Value per punk: ${PUNK_VALUE} sats`)
     console.log(`   Locked balance: ${locked} sats`)
 
