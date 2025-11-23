@@ -606,6 +606,40 @@ export async function syncPunksFromNostr(
 
     console.log(`   Found ${myEscrowListings.size} active escrow listings by this user`)
 
+    // Verify escrow listings against Vercel Blob storage
+    // Nostr events can have stale data, so we cross-reference with the authoritative blob
+    if (myEscrowListings.size > 0) {
+      try {
+        console.log('   🔍 Verifying escrow listings against blob storage...')
+        const { getAllEscrowListings } = await import('./escrowApi')
+        const blobListings = await getAllEscrowListings()
+
+        // Build set of active blob listings (status = pending or deposited)
+        const activeBlobPunkIds = new Set(
+          blobListings
+            .filter(l => l.status === 'pending' || l.status === 'deposited')
+            .map(l => l.punkId)
+        )
+
+        console.log(`   📋 Found ${activeBlobPunkIds.size} active listings in blob storage`)
+
+        // Remove any Nostr-detected listings that aren't in the blob or are inactive
+        for (const punkId of myEscrowListings) {
+          if (!activeBlobPunkIds.has(punkId)) {
+            console.log(`   ⚠️  Removing stale escrow listing: ${punkId.slice(0, 8)}... (not found in blob or inactive)`)
+            myEscrowListings.delete(punkId)
+          } else {
+            console.log(`   ✅ Verified escrow listing: ${punkId.slice(0, 8)}...`)
+          }
+        }
+
+        console.log(`   Final verified escrow listings: ${myEscrowListings.size}`)
+      } catch (error: any) {
+        console.warn('   ⚠️  Failed to verify escrow listings against blob:', error.message)
+        console.warn('   Continuing with Nostr-only detection (may include stale listings)')
+      }
+    }
+
     // Build ownership history from sold events and transfers
     const punkOwnership = new Map<string, {
       currentOwner: string | null // null if transferred away
