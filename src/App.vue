@@ -874,7 +874,6 @@ async function listPunk(punk: PunkState) {
     const success = await listPunkForSale(
       punk.punkId,
       BigInt(price),
-      punk.vtxoOutpoint, // Use updated outpoint after escrow transfer
       compressedHex,
       privateKeyHex,
       arkAddress,

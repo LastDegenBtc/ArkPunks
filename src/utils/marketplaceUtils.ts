@@ -158,7 +158,6 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
       try {
         const punkIdTag = event.tags.find(t => t[0] === 'punk_id')
         const priceTag = event.tags.find(t => t[0] === 'price')
-        const vtxoTag = event.tags.find(t => t[0] === 'vtxo')
         const compressedTag = event.tags.find(t => t[0] === 'compressed')
         const arkAddressTag = event.tags.find(t => t[0] === 'ark_address')
         const saleModeTag = event.tags.find(t => t[0] === 'sale_mode')
@@ -186,12 +185,11 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
           continue
         }
 
-        // Must have vtxo, compressed, and ark_address for active listings
-        if (!vtxoTag || !compressedTag || !arkAddressTag) {
+        // Must have compressed and ark_address for active listings
+        if (!compressedTag || !arkAddressTag) {
           continue
         }
 
-        const vtxoOutpoint = vtxoTag[1]
         const compressedHex = compressedTag[1]
         const ownerArkAddress = arkAddressTag[1]
 
@@ -219,7 +217,7 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
           ownerArkAddress,
           listingPrice: price,
           metadata,
-          vtxoOutpoint,
+          vtxoOutpoint: `${punkId}:0`, // Placeholder - VTXO tracked via wallet, not Nostr
           listedAt: event.created_at,
           saleMode,
           escrowAddress
@@ -252,7 +250,6 @@ export async function getMarketplaceListings(): Promise<MarketplaceListing[]> {
 export async function listPunkForSale(
   punkId: string,
   price: bigint,
-  vtxoOutpoint: string,
   compressedHex: string,
   privateKey: string,
   arkAddress: string,
@@ -278,7 +275,6 @@ export async function listPunkForSale(
       ['t', 'arkade-punk-listing'],
       ['punk_id', punkId],
       ['price', price.toString()],
-      ['vtxo', vtxoOutpoint],
       ['compressed', compressedHex],
       ['ark_address', arkAddress],
       ['sale_mode', saleMode],
