@@ -1,16 +1,17 @@
 /**
- * Simplified Escrow Listing API
+ * Escrow Listing API
  *
  * POST /api/escrow/list
  *
- * Creates a marketplace listing immediately (no VTXO deposit needed).
- * Seller keeps their punk until a buyer purchases it.
+ * Seller must send punk to escrow when listing.
+ * Escrow holds punk until sold or cancelled.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getEscrowAddress } from './_lib/escrowWallet.js'
 import { createEscrowListing, getEscrowListing } from './_lib/escrowStore.js'
 import { getPunkOwner, setPunkOwner } from '../ownership/_lib/ownershipStore.js'
+import { getEscrowWallet } from './_lib/escrowArkadeWallet.js'
 
 interface ListRequest {
   punkId: string
@@ -22,7 +23,7 @@ interface ListRequest {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  console.log('🔵 Simplified escrow list endpoint called')
+  console.log('🔵 Escrow list endpoint called')
 
   // Only allow POST
   if (req.method !== 'POST') {
@@ -52,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Check if already listed
     const existingListing = await getEscrowListing(punkId)
-    if (existingListing && existingListing.status === 'pending') {
+    if (existingListing && (existingListing.status === 'pending' || existingListing.status === 'deposited')) {
       console.log('   ⚠️ Punk already listed')
       return res.status(400).json({
         error: 'Punk already listed',
@@ -78,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const escrowAddress = getEscrowAddress()
 
-    // Create listing immediately (no deposit needed)
+    // Create listing in "pending" state (waiting for punk deposit)
     await createEscrowListing({
       punkId,
       sellerPubkey,
@@ -87,18 +88,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       punkVtxoOutpoint: punkVtxoOutpoint || 'unknown',
       escrowAddress,
       compressedMetadata,
-      status: 'pending', // Active immediately
+      status: 'pending', // Will become "deposited" after seller sends punk
       createdAt: Date.now()
     })
 
-    console.log(`✅ Listing created and active immediately`)
+    console.log(`✅ Listing created - waiting for punk deposit`)
 
     return res.status(200).json({
       success: true,
       punkId,
       escrowAddress,
       price,
-      message: 'Punk listed successfully'
+      message: 'Send your punk VTXO to escrow address to activate listing',
+      instructions: [
+        `Send your punk VTXO (~10,100 sats) to: ${escrowAddress}`,
+        'Once received, your listing will appear in the marketplace',
+        'Buyers can then purchase your punk',
+        'When sold, you receive payment automatically (minus 1% fee)'
+      ]
     })
 
   } catch (error: any) {

@@ -96,35 +96,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log('✅ Payment verified')
 
-    // Step 1: Update ownership table (punk → buyer)
+    // Step 1: Find punk VTXO in escrow wallet
+    console.log('📦 Finding punk VTXO in escrow wallet...')
+    const vtxos = await escrowWallet.getVtxos()
+    console.log(`   Found ${vtxos.length} VTXOs in escrow`)
+
+    // Look for punk-sized VTXO (~10,000-10,500 sats)
+    const punkVtxo = vtxos.find(v => v.value >= 10000 && v.value <= 10500 && !v.isSpent)
+
+    if (!punkVtxo) {
+      console.error('❌ No punk VTXO found in escrow')
+      console.error('   Available VTXOs:')
+      vtxos.forEach(v => console.error(`   - ${v.txid}:${v.vout} (${v.value} sats, spent: ${v.isSpent})`))
+
+      return res.status(500).json({
+        error: 'Punk VTXO not found in escrow',
+        details: 'Seller may not have sent punk to escrow yet'
+      })
+    }
+
+    console.log(`   Found punk VTXO: ${punkVtxo.value} sats`)
+
+    // Step 2: Send punk to buyer
+    console.log(`📤 Sending punk to buyer: ${buyerArkAddress.slice(0, 20)}...`)
+    const punkTxid = await escrowWallet.send(buyerArkAddress, BigInt(punkVtxo.value))
+    console.log(`✅ Punk sent! Txid: ${punkTxid}`)
+
+    // Step 3: Update ownership table (punk → buyer)
     console.log(`📝 Updating ownership: ${punkId.slice(0, 8)}... → ${buyerArkAddress.slice(0, 20)}...`)
     await setPunkOwner(punkId, buyerArkAddress)
     console.log('✅ Ownership updated')
 
-    // Step 2: Send payment to seller
+    // Step 4: Send payment to seller
     console.log(`💸 Sending ${sellerReceives} sats to seller: ${listing.sellerArkAddress.slice(0, 20)}...`)
     const paymentTxid = await escrowWallet.send(listing.sellerArkAddress, sellerReceives)
     console.log(`✅ Payment sent! Txid: ${paymentTxid}`)
     console.log(`   Fee (${fee} sats) remains in escrow`)
 
-    // Step 3: Mark listing as sold
+    // Step 5: Mark listing as sold
     console.log('📝 Updating listing status...')
     await updateEscrowStatus(punkId, 'sold', {
       soldAt: Date.now(),
       buyerAddress: buyerArkAddress,
       buyerPubkey,
+      punkTransferTxid: punkTxid,
       paymentTransferTxid: paymentTxid
     })
     console.log('✅ Listing marked as sold')
 
-    console.log('✅ Purchase completed successfully!')
-    console.log(`   ℹ️  Seller must manually send punk VTXO to buyer: ${buyerArkAddress}`)
+    console.log('✅ Atomic swap completed!')
 
     const response: ExecuteResponse = {
       success: true,
       punkId,
       paymentTxid,
-      message: `Purchase complete! Seller must send punk to ${buyerArkAddress.slice(0, 20)}...`
+      message: `Atomic swap complete! Punk and payment transferred.`
     }
 
     return res.status(200).json(response)

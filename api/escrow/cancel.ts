@@ -1,15 +1,15 @@
 /**
- * Simplified Escrow Cancel API
+ * Escrow Cancel API
  *
  * POST /api/escrow/cancel
  *
- * Cancels a listing immediately. Since seller keeps their punk,
- * no VTXO returns are needed.
+ * Cancels a listing and returns punk from escrow to seller.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getEscrowListing, updateEscrowStatus } from './_lib/escrowStore.js'
 import { getPunkOwner } from '../ownership/_lib/ownershipStore.js'
+import { getEscrowWallet } from './_lib/escrowArkadeWallet.js'
 
 interface CancelRequest {
   punkId: string
@@ -84,8 +84,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
+    // If listing was deposited, return punk from escrow to seller
+    let punkReturnTxid: string | undefined
+
+    if (listing.status === 'deposited' || listing.status === 'pending') {
+      console.log('📦 Checking escrow wallet for punk to return...')
+      const escrowWallet = await getEscrowWallet()
+      const vtxos = await escrowWallet.getVtxos()
+      console.log(`   Found ${vtxos.length} VTXOs in escrow`)
+
+      // Find punk VTXO (~10,000-10,500 sats)
+      const punkVtxo = vtxos.find(v => v.value >= 10000 && v.value <= 10500 && !v.isSpent)
+
+      if (punkVtxo) {
+        console.log(`   Found punk VTXO: ${punkVtxo.value} sats`)
+        console.log(`📤 Returning punk to seller: ${sellerArkAddress.slice(0, 20)}...`)
+
+        punkReturnTxid = await escrowWallet.send(sellerArkAddress, BigInt(punkVtxo.value))
+        console.log(`✅ Punk returned! Txid: ${punkReturnTxid}`)
+      } else {
+        console.warn('⚠️ No punk VTXO found in escrow - seller may not have deposited yet')
+      }
+    }
+
     // Mark as cancelled
-    await updateEscrowStatus(punkId, 'cancelled')
+    await updateEscrowStatus(punkId, 'cancelled', {
+      punkTransferTxid: punkReturnTxid
+    })
 
     console.log(`✅ Listing cancelled for punk ${punkId.slice(0, 8)}...`)
 
@@ -93,7 +118,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       punkId,
       status: 'cancelled',
-      message: 'Listing cancelled successfully'
+      punkReturnTxid,
+      message: punkReturnTxid
+        ? 'Listing cancelled and punk returned to seller'
+        : 'Listing cancelled (no punk deposit found)'
     })
   } catch (error: any) {
     console.error('❌ Error cancelling listing:', error)
