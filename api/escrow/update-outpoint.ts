@@ -41,17 +41,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    // Debug: Check if we can read the listing first
-    console.log('   📋 Checking if listing exists...')
+    // Wait for blob propagation with retry logic
+    console.log('   📋 Checking if listing exists (with retry for blob propagation)...')
     const { getEscrowListing } = await import('./_lib/escrowStore.js')
-    const existingListing = await getEscrowListing(punkId)
+
+    let existingListing = null
+    const maxAttempts = 5
+    const baseDelay = 200 // ms
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      existingListing = await getEscrowListing(punkId)
+
+      if (existingListing) {
+        console.log(`   ✅ Found listing on attempt ${attempt}`)
+        break
+      }
+
+      if (attempt < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempt - 1) // Exponential backoff: 200ms, 400ms, 800ms, 1600ms
+        console.log(`   ⏳ Attempt ${attempt}/${maxAttempts} - Listing not found yet, retrying in ${delay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
 
     if (!existingListing) {
-      console.error(`   ❌ Listing not found for punkId: ${punkId}`)
-      console.error(`   This means the /api/escrow/list call may have failed silently`)
+      console.error(`   ❌ Listing not found after ${maxAttempts} attempts`)
+      console.error(`   This likely means the /api/escrow/list call failed or blob is severely delayed`)
       return res.status(404).json({
         error: 'Listing not found',
-        details: `No escrow listing found for punk ${punkId}. Please create a listing first.`,
+        details: `No escrow listing found for punk ${punkId} after ${maxAttempts} retry attempts. Please try again.`,
         punkId
       })
     }
