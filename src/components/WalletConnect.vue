@@ -387,7 +387,7 @@
           </div>
 
           <div v-else class="vtxo-list">
-            <div v-for="(vtxo, index) in vtxos" :key="vtxo.txid + ':' + vtxo.vout" class="vtxo-item">
+            <div v-for="(vtxo, index) in vtxos" :key="(vtxo.txid || 'vtxo') + ':' + vtxo.vout + ':' + index" class="vtxo-item">
               <div class="vtxo-header">
                 <span class="vtxo-number">#{{ index + 1 }}</span>
                 <span class="vtxo-amount">{{ vtxo.value }} sats</span>
@@ -398,7 +398,7 @@
               <div class="vtxo-details">
                 <div class="vtxo-detail-row">
                   <span class="detail-label">Txid:</span>
-                  <span class="detail-value mono">{{ vtxo.txid.slice(0, 16) }}...{{ vtxo.txid.slice(-16) }}</span>
+                  <span class="detail-value mono">{{ vtxo.txid ? `${vtxo.txid.slice(0, 16)}...${vtxo.txid.slice(-16)}` : 'N/A' }}</span>
                 </div>
                 <div class="vtxo-detail-row">
                   <span class="detail-label">Output:</span>
