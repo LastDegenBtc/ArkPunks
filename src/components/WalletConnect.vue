@@ -398,7 +398,7 @@
               <div class="vtxo-details">
                 <div class="vtxo-detail-row">
                   <span class="detail-label">Txid:</span>
-                  <span class="detail-value mono">{{ vtxo.txid ? `${vtxo.txid.slice(0, 16)}...${vtxo.txid.slice(-16)}` : 'N/A' }}</span>
+                  <span class="detail-value mono txid-full">{{ vtxo.txid || 'N/A' }}</span>
                 </div>
                 <div class="vtxo-detail-row">
                   <span class="detail-label">Output:</span>
@@ -2394,6 +2394,15 @@ h3 {
 .detail-value.mono {
   font-family: 'Courier New', monospace;
   font-size: 11px;
+}
+
+.detail-value.txid-full {
+  word-break: break-all;
+  flex: 1;
+  text-align: right;
+  max-width: 70%;
+  cursor: text;
+  user-select: all;
 }
 
 .vtxo-summary {
