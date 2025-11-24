@@ -211,14 +211,14 @@
                     📅 Expires: {{ vtxoExpirationInfo.expiryDate }}<br>
                     ⏱️ Time remaining: {{ vtxoExpirationInfo.timeRemaining }}<br>
                     <br>
-                    <em>Your VTXOs are currently blocked. We're working with the Arkade team to unblock them soon.<br>
-                    In the meantime, they will automatically become recoverable after expiry.</em>
+                    <em>Your preconfirmed VTXOs are fully spendable!<br>
+                    They will become "settled" after the next Arkade round (1-2 minutes).</em>
                   </span>
                 </span>
                 <span v-else>
                   <br>
-                  <em>Your VTXOs are currently blocked. We're working with the Arkade team to unblock them soon.<br>
-                  Refresh your balance to check if they've been unblocked.</em>
+                  <em>Your preconfirmed VTXOs are fully spendable!<br>
+                  They will transition to "settled" status after the next Arkade round completes.</em>
                 </span>
               </span>
               <span v-else-if="balance.recoverable > 0n">
