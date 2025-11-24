@@ -6,7 +6,7 @@
     <!-- Loading State -->
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>Loading market data from Nostr...</p>
+      <p>Loading market data from escrow...</p>
     </div>
 
     <!-- Stats Grid -->
@@ -173,10 +173,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { getSalesHistory, getMarketStats, getPunkMintEvent } from '@/utils/nostrRegistry'
+import { getPunkMintEvent } from '@/utils/nostrRegistry'
 import { decompressPunkMetadata } from '@/utils/compression'
 import { generatePunkImage, calculateRarityScore } from '@/utils/generator'
 import type { PunkMetadata } from '@/types/punk'
+
+// API URL (dynamically determined from current location)
+const API_URL = window.location.origin
 
 interface Sale {
   id: string
@@ -270,22 +273,47 @@ function prevPage() {
 async function loadStats() {
   try {
     loading.value = true
-    console.log('📊 Loading market statistics...')
+    console.log('📊 Loading market statistics from escrow API...')
 
-    // Fetch sales history
-    const sales = await getSalesHistory()
+    // Fetch sales history and stats from escrow API
+    const response = await fetch(`${API_URL}/api/escrow/sales`)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch sales: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to fetch sales')
+    }
+
+    // Convert API sales to internal format
+    const sales: Sale[] = data.sales.map((s: any) => ({
+      id: s.punkId,
+      punkId: s.punkId,
+      price: BigInt(s.price),
+      buyer: s.buyer,
+      seller: s.seller,
+      timestamp: s.timestamp
+    }))
+
     allSales.value = sales
     recentSales.value = paginatedSales.value
 
-    // Fetch market stats
-    const marketStats = await getMarketStats()
-    stats.value = marketStats
+    // Convert API stats to internal format
+    stats.value = {
+      floorPrice: BigInt(data.stats.floorPrice),
+      highestSale: BigInt(data.stats.highestSale),
+      totalVolume: BigInt(data.stats.totalVolume),
+      totalSales: data.stats.totalSales,
+      averagePrice: BigInt(data.stats.averagePrice)
+    }
 
-    console.log('✅ Market stats loaded:')
-    console.log('   Floor:', formatSats(marketStats.floorPrice))
-    console.log('   Highest:', formatSats(marketStats.highestSale))
-    console.log('   Volume:', formatSats(marketStats.totalVolume))
-    console.log('   Sales:', marketStats.totalSales)
+    console.log('✅ Market stats loaded from escrow:')
+    console.log('   Floor:', formatSats(stats.value.floorPrice))
+    console.log('   Highest:', formatSats(stats.value.highestSale))
+    console.log('   Volume:', formatSats(stats.value.totalVolume))
+    console.log('   Sales:', stats.value.totalSales)
 
   } catch (error) {
     console.error('Failed to load market stats:', error)

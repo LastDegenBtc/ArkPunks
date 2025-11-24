@@ -179,6 +179,14 @@ export async function getAllEscrowListings(): Promise<EscrowListing[]> {
 }
 
 /**
+ * Get all escrow listings regardless of status (for stats/history)
+ */
+export async function getAllListingsIncludingSold(): Promise<EscrowListing[]> {
+  const store = await readStore()
+  return Object.values(store.listings)
+}
+
+/**
  * Update escrow listing status
  */
 export async function updateEscrowStatus(
