@@ -370,6 +370,56 @@
         </div>
       </div>
 
+      <!-- VTXO Information Section -->
+      <div class="vtxo-info-section">
+        <div class="troubleshooting-header" @click="showVtxoInfo = !showVtxoInfo">
+          <span class="label">📊 VTXO Information</span>
+          <span class="toggle-icon">{{ showVtxoInfo ? '▼' : '▶' }}</span>
+        </div>
+        <div v-if="showVtxoInfo" class="vtxo-info-content">
+          <p class="info-text">
+            <strong>Your Virtual UTXOs (VTXOs)</strong><br>
+            VTXOs are off-chain Bitcoin balances on the Arkade network. All transactions are to yourself.
+          </p>
+
+          <div v-if="vtxos.length === 0" class="no-vtxos">
+            <p>No VTXOs found. Connect your wallet to see your VTXOs.</p>
+          </div>
+
+          <div v-else class="vtxo-list">
+            <div v-for="(vtxo, index) in vtxos" :key="vtxo.txid + ':' + vtxo.vout" class="vtxo-item">
+              <div class="vtxo-header">
+                <span class="vtxo-number">#{{ index + 1 }}</span>
+                <span class="vtxo-amount">{{ vtxo.value }} sats</span>
+                <span :class="['vtxo-status', getVtxoStatusClass(vtxo)]">
+                  {{ getVtxoStatusLabel(vtxo) }}
+                </span>
+              </div>
+              <div class="vtxo-details">
+                <div class="vtxo-detail-row">
+                  <span class="detail-label">Txid:</span>
+                  <span class="detail-value mono">{{ vtxo.txid.slice(0, 16) }}...{{ vtxo.txid.slice(-16) }}</span>
+                </div>
+                <div class="vtxo-detail-row">
+                  <span class="detail-label">Output:</span>
+                  <span class="detail-value">{{ vtxo.vout }}</span>
+                </div>
+                <div v-if="vtxo.virtualStatus?.batchExpiry" class="vtxo-detail-row">
+                  <span class="detail-label">Expires:</span>
+                  <span class="detail-value">{{ formatTimestamp(vtxo.virtualStatus.batchExpiry) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="vtxo-summary">
+            <strong>Total VTXOs:</strong> {{ vtxos.length }}<br>
+            <strong>Total Value:</strong> {{ balance.total }} sats<br>
+            <small>All funds are yours - VTXOs represent your Bitcoin locked in Arkade contracts.</small>
+          </p>
+        </div>
+      </div>
+
       <div class="wallet-actions">
         <button @click="refreshBalance" class="btn btn-secondary" :disabled="refreshing">
           {{ refreshing ? 'Refreshing...' : '🔄 Refresh' }}
@@ -529,6 +579,7 @@ const syncing = ref(false) // Reserve sync in progress
 const recovering = ref(false) // VTXO recovery in progress
 const showTroubleshooting = ref(false) // Show troubleshooting section
 const showLightning = ref(false) // Show Lightning section
+const showVtxoInfo = ref(false) // Show VTXO information section
 
 // Lightning state
 const lightningTab = ref<'receive' | 'send'>('receive')
@@ -1048,6 +1099,33 @@ function formatAddress(addr: string): string {
 
 function formatSats(sats: bigint): string {
   return sats.toLocaleString()
+}
+
+function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp)
+  return date.toLocaleString()
+}
+
+function getVtxoStatusLabel(vtxo: any): string {
+  const state = vtxo.virtualStatus?.state || 'unknown'
+  const isSpent = vtxo.isSpent || false
+
+  if (isSpent) return 'Spent'
+  if (state === 'settled') return 'Settled ✓'
+  if (state === 'preconfirmed') return 'Preconfirmed'
+  if (state === 'swept') return 'Swept'
+  return 'Unknown'
+}
+
+function getVtxoStatusClass(vtxo: any): string {
+  const state = vtxo.virtualStatus?.state || 'unknown'
+  const isSpent = vtxo.isSpent || false
+
+  if (isSpent) return 'status-spent'
+  if (state === 'settled') return 'status-settled'
+  if (state === 'preconfirmed') return 'status-preconfirmed'
+  if (state === 'swept') return 'status-swept'
+  return 'status-unknown'
 }
 
 async function copyAddress() {
@@ -2177,6 +2255,161 @@ h3 {
   background: rgba(255, 152, 0, 0.1);
   border-left: 2px solid #ff9800;
   border-radius: 4px;
+}
+
+/* VTXO Information Section */
+.vtxo-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px;
+  background: rgba(68, 68, 68, 0.3);
+  border-radius: 6px;
+  border: 1px solid #444;
+  margin-top: 16px;
+}
+
+.vtxo-info-content {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #444;
+}
+
+.vtxo-info-content .info-text {
+  color: #ddd;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+}
+
+.vtxo-info-content .info-text strong {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.no-vtxos {
+  padding: 16px;
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+}
+
+.vtxo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.vtxo-item {
+  background: rgba(34, 34, 34, 0.5);
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.vtxo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #444;
+}
+
+.vtxo-number {
+  font-weight: 600;
+  color: #999;
+  font-size: 12px;
+}
+
+.vtxo-amount {
+  font-weight: 700;
+  color: #4caf50;
+  font-size: 14px;
+}
+
+.vtxo-status {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-settled {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+
+.status-preconfirmed {
+  background: rgba(255, 152, 0, 0.2);
+  color: #ff9800;
+}
+
+.status-spent {
+  background: rgba(244, 67, 54, 0.2);
+  color: #f44336;
+}
+
+.status-swept {
+  background: rgba(156, 39, 176, 0.2);
+  color: #9c27b0;
+}
+
+.status-unknown {
+  background: rgba(158, 158, 158, 0.2);
+  color: #9e9e9e;
+}
+
+.vtxo-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vtxo-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.detail-label {
+  color: #999;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #ddd;
+  font-weight: 400;
+}
+
+.detail-value.mono {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.vtxo-summary {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.vtxo-summary strong {
+  color: #4caf50;
+}
+
+.vtxo-summary small {
+  color: #999;
+  display: block;
+  margin-top: 8px;
+  font-style: italic;
 }
 
 /* Nostr Public Key Section */
