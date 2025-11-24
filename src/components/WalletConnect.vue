@@ -216,8 +216,10 @@
                   </span>
                 </span>
                 <span v-else>
-                  These normally complete the Arkade round cycle (1-2 minutes).<br>
-                  <strong>Just wait a few minutes and refresh your balance.</strong>
+                  <br>
+                  <em>Note: Arkade mainnet is in testing. Regular batch swaps are not running yet.<br>
+                  Your VTXOs may take longer than usual to settle, or may need to wait for expiry to become recoverable.<br>
+                  Refresh your balance to check status.</em>
                 </span>
               </span>
               <span v-else-if="balance.recoverable > 0n">
@@ -1186,7 +1188,11 @@ async function recoverExpiredVtxos() {
     console.log(`   Recoverable balance: ${recoverableBalance} sats`)
 
     if (recoverableBalance === 0) {
-      alert('No recoverable VTXOs found.')
+      alert(
+        'No recoverable VTXOs found.\n\n' +
+        'Your VTXOs may still be preconfirmed and waiting for expiry.\n' +
+        'Check the expiration date in the troubleshooting section above.'
+      )
       return
     }
 
@@ -1209,7 +1215,7 @@ async function recoverExpiredVtxos() {
     alert(
       `Failed to recover VTXOs:\n\n` +
       `${error.message}\n\n` +
-      `Please try again or contact support if the issue persists.`
+      `Please try again later.`
     )
   } finally {
     recovering.value = false
