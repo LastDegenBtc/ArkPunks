@@ -423,9 +423,82 @@
           {{ refreshing ? 'Refreshing...' : '🔄 Refresh' }}
         </button>
 
+        <button @click="showSendModal = true" class="btn btn-send" :disabled="balance.available === 0n">
+          📤 Send
+        </button>
+
         <button @click="exportWallet" class="btn btn-export">
           💾 Export Wallet
         </button>
+      </div>
+
+      <!-- Send Modal -->
+      <div v-if="showSendModal" class="modal-overlay" @click="showSendModal = false">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>📤 Send Bitcoin (Off-chain)</h3>
+            <button @click="showSendModal = false" class="btn-close">×</button>
+          </div>
+
+          <div class="modal-body">
+            <div class="info-box">
+              <p>Send your available sats to any Arkade wallet address (ark...).</p>
+              <p><strong>Available to send:</strong> {{ formatSats(availableForMinting) }} sats</p>
+            </div>
+
+            <div class="send-input-group">
+              <label>
+                <strong>Recipient Arkade Address:</strong>
+                <input
+                  v-model="sendRecipientAddress"
+                  type="text"
+                  placeholder="ark..."
+                  class="input-address"
+                />
+              </label>
+              <p class="input-hint">
+                Enter the recipient's Arkade off-chain address (starts with "ark")
+              </p>
+            </div>
+
+            <div class="send-input-group">
+              <label>
+                <strong>Amount (sats):</strong>
+                <input
+                  v-model.number="sendAmount"
+                  type="number"
+                  min="1000"
+                  :max="Number(balance.available)"
+                  placeholder="10000"
+                  class="input-amount"
+                />
+              </label>
+              <p class="input-hint">
+                Minimum: 1,000 sats. You have {{ formatSats(balance.available) }} sats available.
+              </p>
+            </div>
+
+            <div v-if="sendStatus" class="send-status">
+              <p :class="sendSuccess ? 'status-success' : 'status-error'">
+                {{ sendStatus }}
+              </p>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              @click="sendSats"
+              :disabled="!sendRecipientAddress || !sendAmount || sendAmount < 1000 || sending"
+              class="btn btn-primary"
+            >
+              {{ sending ? 'Sending...' : 'Send' }}
+            </button>
+
+            <button @click="showSendModal = false" class="btn btn-secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- L1 Exit Modal -->
@@ -579,6 +652,14 @@ const recovering = ref(false) // VTXO recovery in progress
 const showTroubleshooting = ref(false) // Show troubleshooting section
 const showLightning = ref(false) // Show Lightning section
 const showVtxoInfo = ref(false) // Show VTXO information section
+
+// Send sats modal state
+const showSendModal = ref(false)
+const sendRecipientAddress = ref('')
+const sendAmount = ref<number | null>(null)
+const sending = ref(false)
+const sendStatus = ref('')
+const sendSuccess = ref(false)
 
 // Lightning state
 const lightningTab = ref<'receive' | 'send'>('receive')
@@ -992,6 +1073,70 @@ async function refreshBalance() {
   }
 }
 
+async function sendSats() {
+  if (!wallet) {
+    sendStatus.value = 'Wallet not connected!'
+    sendSuccess.value = false
+    return
+  }
+
+  if (!sendRecipientAddress.value || !sendAmount.value) {
+    sendStatus.value = 'Please enter recipient address and amount'
+    sendSuccess.value = false
+    return
+  }
+
+  if (sendAmount.value < 1000) {
+    sendStatus.value = 'Minimum amount is 1,000 sats'
+    sendSuccess.value = false
+    return
+  }
+
+  if (BigInt(sendAmount.value) > balance.value.available) {
+    sendStatus.value = `Insufficient balance. You have ${formatSats(balance.value.available)} sats available.`
+    sendSuccess.value = false
+    return
+  }
+
+  sending.value = true
+  sendStatus.value = ''
+  sendSuccess.value = false
+
+  try {
+    console.log('📤 Sending sats...')
+    console.log('   Recipient:', sendRecipientAddress.value)
+    console.log('   Amount:', sendAmount.value, 'sats')
+
+    const txid = await wallet.send(
+      sendRecipientAddress.value,
+      BigInt(sendAmount.value)
+    )
+
+    console.log('✅ Send successful!')
+    console.log('   TX ID:', txid)
+
+    sendStatus.value = `✅ Sent ${sendAmount.value} sats successfully!\nTX ID: ${txid.slice(0, 16)}...`
+    sendSuccess.value = true
+
+    // Refresh balance
+    await refreshBalance()
+
+    // Reset form after 3 seconds
+    setTimeout(() => {
+      sendRecipientAddress.value = ''
+      sendAmount.value = null
+      sendStatus.value = ''
+      showSendModal.value = false
+    }, 3000)
+
+  } catch (error: any) {
+    console.error('❌ Send failed:', error)
+    sendStatus.value = `Failed to send: ${error?.message || error}`
+    sendSuccess.value = false
+  } finally {
+    sending.value = false
+  }
+}
 
 async function generateQRCode(retryCount = 0) {
   console.log('🔍 Attempting to generate QR code... (attempt', retryCount + 1, ')')
