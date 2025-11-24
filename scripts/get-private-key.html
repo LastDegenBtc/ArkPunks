@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Get Private Key</title>
+</head>
+<body>
+  <h1>Get Private Key from localStorage</h1>
+  <p>Open this file in your browser where ArkPunks is running (same domain)</p>
+  <button onclick="getKey()">Get Private Key</button>
+  <pre id="output"></pre>
+
+  <script>
+    function getKey() {
+      const key = localStorage.getItem('arkade_wallet_private_key')
+      if (key) {
+        document.getElementById('output').textContent = `Private Key (hex): ${key}\n\nKeep this SECRET!`
+      } else {
+        document.getElementById('output').textContent = 'No private key found in localStorage'
+      }
+    }
+  </script>
+</body>
+</html>

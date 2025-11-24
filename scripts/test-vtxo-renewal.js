@@ -14,7 +14,7 @@
  *   node scripts/test-vtxo-renewal.js a1b2c3d4e5f6...
  */
 
-import { Wallet, VtxoManager } from '@arkade-os/sdk'
+import { Wallet, VtxoManager, SingleKey } from '@arkade-os/sdk'
 
 const privateKeyHex = process.argv[2]
 
@@ -31,14 +31,15 @@ console.log('')
 try {
   // Step 1: Load wallet
   console.log('📦 Step 1: Loading wallet...')
-  const privateKey = Buffer.from(privateKeyHex, 'hex')
 
-  const wallet = await Wallet.fromSigner({
-    privateKey,
-    arkUrl: 'https://arkade.computer',
-    indexerUrl: 'https://arkade.computer',
+  // Create identity from private key hex
+  const identity = SingleKey.fromHex(privateKeyHex)
+
+  // Create wallet with Arkade mainnet config
+  const wallet = await Wallet.create({
+    identity,
     esploraUrl: 'https://mempool.space/api',
-    network: 'bitcoin'
+    arkServerUrl: 'https://arkade.computer'
   })
 
   const address = await wallet.getAddress()
