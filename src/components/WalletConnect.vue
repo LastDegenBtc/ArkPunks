@@ -382,12 +382,12 @@
             VTXOs are off-chain Bitcoin balances on the Arkade network. All transactions are to yourself.
           </p>
 
-          <div v-if="vtxos.length === 0" class="no-vtxos">
+          <div v-if="rawVtxos.length === 0" class="no-vtxos">
             <p>No VTXOs found. Connect your wallet to see your VTXOs.</p>
           </div>
 
           <div v-else class="vtxo-list">
-            <div v-for="(vtxo, index) in vtxos" :key="(vtxo.txid || 'vtxo') + ':' + vtxo.vout + ':' + index" class="vtxo-item">
+            <div v-for="(vtxo, index) in rawVtxos" :key="(vtxo.txid || 'vtxo') + ':' + vtxo.vout + ':' + index" class="vtxo-item">
               <div class="vtxo-header">
                 <span class="vtxo-number">#{{ index + 1 }}</span>
                 <span class="vtxo-amount">{{ vtxo.value }} sats</span>
@@ -413,7 +413,7 @@
           </div>
 
           <p class="vtxo-summary">
-            <strong>Total VTXOs:</strong> {{ vtxos.length }}<br>
+            <strong>Total VTXOs:</strong> {{ rawVtxos.length }}<br>
             <strong>Total Value:</strong> {{ balance.total }} sats<br>
             <small>All funds are yours - VTXOs represent your Bitcoin locked in Arkade contracts.</small>
           </p>
@@ -574,6 +574,7 @@ const balance = ref<WalletBalance>({
 })
 const vtxoCount = ref(0)
 const vtxos = ref<VtxoInput[]>([]) // Store VTXOs to calculate punk-locked balance
+const rawVtxos = ref<any[]>([]) // Raw VTXOs from SDK for display
 const punkBalanceTrigger = ref(0) // Reactive trigger to force punkLockedBalance recalculation
 const syncing = ref(false) // Reserve sync in progress
 const recovering = ref(false) // VTXO recovery in progress
@@ -1052,9 +1053,14 @@ async function updateWalletInfo() {
   // Fetch VTXOs to calculate punk-locked balance
   try {
     vtxos.value = await wallet.getVtxos()
+    // Also fetch raw VTXOs for display (with status, expiry, etc.)
+    if (wallet.getRawVtxos) {
+      rawVtxos.value = await wallet.getRawVtxos()
+    }
   } catch (error) {
     console.error('Failed to fetch VTXOs:', error)
     vtxos.value = []
+    rawVtxos.value = []
   }
 
   console.log('📍 Addresses updated:')

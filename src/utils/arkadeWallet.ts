@@ -39,6 +39,7 @@ export interface ArkadeWalletInterface {
   sdkWallet?: any // Underlying Arkade SDK wallet instance (for Lightning swaps)
   getBalance: () => Promise<WalletBalance>
   getVtxos: () => Promise<VtxoInput[]>
+  getRawVtxos?: () => Promise<any[]> // Raw VTXOs from SDK (for display purposes)
   send: (recipient: string, amount: bigint, feeRate?: number) => Promise<string>
   board: (amount: bigint) => Promise<string> // On-chain to off-chain
   settle: () => Promise<string> // Finalize pending boarding/transactions (returns txid)
@@ -300,6 +301,10 @@ export async function createArkadeWallet(
             leaf: v.leaf || ''
           }
         })
+      },
+      getRawVtxos: async () => {
+        // Return raw VTXOs from SDK without transformation (for display purposes)
+        return await wallet.getVtxos()
       },
       send: async (recipient, amount, _feeRate) => {
         // Use sendBitcoin from Arkade SDK for off-chain transfers
