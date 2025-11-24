@@ -422,7 +422,7 @@
             :disabled="recoveringVtxos"
             style="margin-top: 10px; width: 100%;"
           >
-            {{ recoveringVtxos ? 'Recovering...' : '🔧 Force Recover VTXOs' }}
+            {{ recoveringVtxos ? 'Renewing...' : '🔧 Force Renew VTXOs' }}
           </button>
           <p v-if="recoveryStatus" class="recovery-status" :class="recoverySuccess ? 'status-success' : 'status-error'">
             {{ recoveryStatus }}
@@ -1237,16 +1237,18 @@ async function forceRecoverVtxos() {
     const currentBalance = await wallet.getBalance()
     console.log(`💰 Balance.recoverable: ${currentBalance.recoverable} sats`)
 
-    // Step 3: Try to recover VTXOs
-    console.log('🔄 Attempting recovery with VtxoManager...')
+    // Step 3: Try to renew VTXOs (Arkade CEO recommendation)
+    console.log('🔄 Attempting to renew VTXOs with VtxoManager...')
     const { VtxoManager } = await import('@arkade-os/sdk')
     const vtxoManager = new VtxoManager(wallet.sdkWallet)
 
     try {
-      const recoverTxid = await vtxoManager.recoverVtxos()
-      console.log(`✅ VTXOs recovered! Txid: ${recoverTxid}`)
+      // First try renewVtxos() - this is what Arkade CEO recommends
+      console.log('   Step 1: Trying renewVtxos()...')
+      const renewTxid = await vtxoManager.renewVtxos()
+      console.log(`✅ VTXOs renewed! Txid: ${renewTxid}`)
 
-      recoveryStatus.value = `✅ VTXOs recovered successfully!\nTxid: ${recoverTxid.slice(0, 16)}...`
+      recoveryStatus.value = `✅ VTXOs renewed successfully!\nTxid: ${renewTxid.slice(0, 16)}...`
       recoverySuccess.value = true
 
       // Refresh balance
@@ -1257,17 +1259,47 @@ async function forceRecoverVtxos() {
         recoveryStatus.value = ''
       }, 5000)
 
-    } catch (recoverError: any) {
-      console.error('❌ Recovery failed:', recoverError)
+    } catch (renewError: any) {
+      console.error('❌ Renewal failed:', renewError)
 
-      // Log detailed error info for debugging
-      console.log('📋 Debug Info for Arkade devs:')
-      console.log('   Error:', recoverError.message)
-      console.log('   All VTXOs:', allVtxos)
-      console.log('   Balance:', currentBalance)
+      // If no expiring VTXOs, that's OK
+      if (renewError.message?.includes('No expiring VTXOs') || renewError.message?.includes('no vtxos')) {
+        recoveryStatus.value = `✅ No VTXOs need renewal - all good!`
+        recoverySuccess.value = true
+        setTimeout(() => {
+          recoveryStatus.value = ''
+        }, 3000)
+        return
+      }
 
-      recoveryStatus.value = `❌ Recovery failed: ${recoverError?.message || recoverError}\n\nCheck console for debug info to send to Arkade devs.`
-      recoverySuccess.value = false
+      // Try recoverVtxos() as fallback for swept/expired VTXOs
+      console.log('   Step 2: Renewal failed, trying recoverVtxos()...')
+      try {
+        const recoverTxid = await vtxoManager.recoverVtxos()
+        console.log(`✅ VTXOs recovered! Txid: ${recoverTxid}`)
+
+        recoveryStatus.value = `✅ VTXOs recovered successfully!\nTxid: ${recoverTxid.slice(0, 16)}...`
+        recoverySuccess.value = true
+
+        await refreshBalance()
+
+        setTimeout(() => {
+          recoveryStatus.value = ''
+        }, 5000)
+
+      } catch (recoverError: any) {
+        console.error('❌ Recovery also failed:', recoverError)
+
+        // Log detailed error info for debugging
+        console.log('📋 Debug Info for Arkade devs:')
+        console.log('   Renew Error:', renewError.message)
+        console.log('   Recover Error:', recoverError.message)
+        console.log('   All VTXOs:', allVtxos)
+        console.log('   Balance:', currentBalance)
+
+        recoveryStatus.value = `❌ Both renewal and recovery failed.\n\nRenew: ${renewError.message}\nRecover: ${recoverError.message}\n\nCheck console for debug info.`
+        recoverySuccess.value = false
+      }
     }
 
   } catch (error: any) {

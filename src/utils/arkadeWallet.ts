@@ -367,7 +367,7 @@ export async function createArkadeWallet(
       },
       checkAndRenewVtxos: async () => {
         try {
-          console.log('🔍 Checking for expired VTXOs...')
+          console.log('🔍 Checking for expiring VTXOs...')
 
           // Import VtxoManager from SDK
           const { VtxoManager } = await import('@arkade-os/sdk')
@@ -375,48 +375,63 @@ export async function createArkadeWallet(
           // Create VtxoManager
           const vtxoManager = new VtxoManager(wallet)
 
-          // For truly expired/swept VTXOs, use recoverVtxos()
-          // This is what the Arkade devs recommend for expired VTXOs
+          // Get all VTXOs to check which ones need renewal
           const allVtxos = await wallet.getVtxos()
-          const sweptVtxos = allVtxos.filter((v: any) =>
-            v.virtualStatus?.state === 'swept' && !v.isSpent
-          )
+          console.log(`   Found ${allVtxos.length} total VTXOs`)
 
-          if (sweptVtxos.length > 0) {
-            console.log(`🔄 Found ${sweptVtxos.length} swept VTXO(s), recovering...`)
+          // Log VTXO states for debugging
+          allVtxos.forEach((v: any, i: number) => {
+            console.log(`   VTXO ${i + 1}: ${v.value} sats, state: ${v.virtualStatus?.state}, expiry: ${new Date(v.virtualStatus?.batchExpiry || 0).toLocaleString()}`)
+          })
 
-            try {
-              // Use recoverVtxos() for swept/expired VTXOs
-              const txid = await vtxoManager.recoverVtxos()
+          try {
+            // Arkade CEO recommends: Use renewVtxos() to renew expiring VTXOs
+            // The SDK will determine which VTXOs need renewal
+            console.log('🔄 Attempting to renew expiring VTXOs...')
+            const txid = await vtxoManager.renewVtxos()
 
-              console.log(`✅ VTXOs recovered! Txid: ${txid}`)
+            console.log(`✅ VTXOs renewed! Txid: ${txid}`)
 
+            return {
+              renewed: true,
+              txid,
+              expiringCount: allVtxos.length
+            }
+          } catch (renewError: any) {
+            // If no VTXOs need renewal, that's OK
+            if (renewError.message?.includes('No expiring VTXOs') || renewError.message?.includes('no vtxos')) {
+              console.log('✅ No VTXOs need renewal')
               return {
-                renewed: true,
-                txid,
-                expiringCount: sweptVtxos.length
+                renewed: false,
+                expiringCount: 0
               }
-            } catch (recoverError: any) {
-              // If recovery fails due to dust threshold, just log it
-              // These tiny VTXOs aren't worth recovering anyway
-              if (recoverError.message?.includes('dust threshold')) {
-                console.warn(`⚠️ Swept VTXOs too small to recover (below dust threshold)`)
+            }
+
+            // For swept/truly expired VTXOs, fall back to recoverVtxos()
+            if (renewError.message?.includes('swept') || renewError.message?.includes('expired')) {
+              console.log('🔄 VTXOs are swept/expired, attempting recovery...')
+              try {
+                const recoverTxid = await vtxoManager.recoverVtxos()
+                console.log(`✅ VTXOs recovered! Txid: ${recoverTxid}`)
+                return {
+                  renewed: true,
+                  txid: recoverTxid,
+                  expiringCount: allVtxos.length
+                }
+              } catch (recoverError: any) {
+                console.warn(`⚠️ Recovery failed: ${recoverError.message}`)
                 return {
                   renewed: false,
                   expiringCount: 0
                 }
               }
-              throw recoverError
             }
-          }
 
-          console.log('✅ No expired VTXOs need recovery')
-          return {
-            renewed: false,
-            expiringCount: 0
+            // Other errors
+            throw renewError
           }
         } catch (error) {
-          console.error('❌ VTXO recovery failed:', error)
+          console.error('❌ VTXO renewal failed:', error)
           return {
             renewed: false,
             expiringCount: 0
