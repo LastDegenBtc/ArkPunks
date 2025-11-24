@@ -1152,23 +1152,53 @@ async function sendSats() {
     // Check if error is due to recoverable VTXOs
     const errorMsg = error?.message || String(error)
     if (errorMsg.includes('VTXO_RECOVERABLE') || errorMsg.includes('is recoverable')) {
-      console.log('🔄 Detected recoverable VTXO - attempting recovery...')
-      sendStatus.value = '🔄 Recovering VTXOs, please wait...'
+      console.log('🔄 Detected recoverable VTXO - attempting renewal...')
+      sendStatus.value = '🔄 Renewing VTXOs, please wait...'
 
       try {
         // Import VtxoManager
         const { VtxoManager } = await import('@arkade-os/sdk')
         const vtxoManager = new VtxoManager(wallet.sdkWallet)
 
-        // Recover VTXOs
-        const recoverTxid = await vtxoManager.recoverVtxos()
-        console.log(`✅ VTXOs recovered! Txid: ${recoverTxid}`)
+        let renewalSuccess = false
+
+        try {
+          // Step 1: Try renewVtxos() first (Arkade CEO recommendation)
+          console.log('   Step 1: Trying renewVtxos()...')
+          const renewTxid = await vtxoManager.renewVtxos()
+          console.log(`✅ VTXOs renewed! Txid: ${renewTxid}`)
+          renewalSuccess = true
+
+        } catch (renewError: any) {
+          console.error('❌ Renewal failed:', renewError)
+
+          // If no expiring VTXOs, that's actually OK - try sending anyway
+          if (renewError.message?.includes('No expiring VTXOs') || renewError.message?.includes('no vtxos')) {
+            console.log('   No VTXOs needed renewal, continuing to retry send...')
+            renewalSuccess = true
+          } else {
+            // Step 2: Try recoverVtxos() as fallback
+            console.log('   Step 2: Trying recoverVtxos() as fallback...')
+            try {
+              const recoverTxid = await vtxoManager.recoverVtxos()
+              console.log(`✅ VTXOs recovered! Txid: ${recoverTxid}`)
+              renewalSuccess = true
+            } catch (recoverError: any) {
+              console.error('❌ Recovery also failed:', recoverError)
+              throw new Error(`Both renewal and recovery failed.\nRenew: ${renewError.message}\nRecover: ${recoverError.message}`)
+            }
+          }
+        }
+
+        if (!renewalSuccess) {
+          throw new Error('Failed to renew or recover VTXOs')
+        }
 
         // Refresh balance
         await refreshBalance()
 
         // Retry send
-        console.log('🔄 Retrying send after recovery...')
+        console.log('🔄 Retrying send after VTXO renewal...')
         sendStatus.value = '🔄 Retrying send...'
 
         const txid = await wallet.send(
@@ -1176,7 +1206,7 @@ async function sendSats() {
           BigInt(sendAmount.value)
         )
 
-        console.log('✅ Send successful after recovery!')
+        console.log('✅ Send successful after VTXO renewal!')
         console.log('   TX ID:', txid)
 
         sendStatus.value = `✅ Sent ${sendAmount.value} sats successfully!\nTX ID: ${txid.slice(0, 16)}...`
@@ -1194,8 +1224,8 @@ async function sendSats() {
         }, 3000)
 
       } catch (recoveryError: any) {
-        console.error('❌ Recovery or retry failed:', recoveryError)
-        sendStatus.value = `Failed to recover VTXOs: ${recoveryError?.message || recoveryError}`
+        console.error('❌ VTXO renewal/recovery or retry failed:', recoveryError)
+        sendStatus.value = `Failed to renew VTXOs: ${recoveryError?.message || recoveryError}`
         sendSuccess.value = false
       }
     } else {
