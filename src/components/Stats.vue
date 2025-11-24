@@ -173,7 +173,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { getPunkMintEvent } from '@/utils/nostrRegistry'
 import { decompressPunkMetadata } from '@/utils/compression'
 import { generatePunkImage, calculateRarityScore } from '@/utils/generator'
 import type { PunkMetadata } from '@/types/punk'
@@ -189,6 +188,7 @@ interface Sale {
   buyer: string
   seller: string
   timestamp: number
+  compressedMetadata?: string // Compressed punk metadata (hex)
 }
 
 interface MarketStats {
@@ -294,7 +294,8 @@ async function loadStats() {
       price: BigInt(s.price),
       buyer: s.buyer,
       seller: s.seller,
-      timestamp: s.timestamp
+      timestamp: s.timestamp,
+      compressedMetadata: s.compressedMetadata
     }))
 
     allSales.value = sales
@@ -362,38 +363,42 @@ async function viewPunk(punkId: string) {
       }
     }
 
-    // Fallback: Fetch from Nostr mint events
-    console.log('⚠️ Punk not in local gallery, fetching from Nostr...')
-    const mintEvent = await getPunkMintEvent(punkId)
+    // Second fallback: Use compressed metadata from sales history (escrow)
+    console.log('⚠️ Punk not in local gallery, checking sales history...')
+    const sale = allSales.value.find(s => s.punkId === punkId)
 
-    if (!mintEvent || !mintEvent.compressedHex) {
-      console.error('❌ Could not fetch punk data from Nostr or localStorage')
-      alert('Unable to load punk details. The punk data is not available.')
+    if (sale && sale.compressedMetadata) {
+      console.log('✅ Found compressed metadata in sales history')
+
+      // Convert compressed hex to Uint8Array
+      const compressedData = new Uint8Array(
+        sale.compressedMetadata.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+      )
+
+      // Decompress metadata
+      const metadata = decompressPunkMetadata(compressedData)
+
+      // Generate image URL from traits
+      const imageUrl = generatePunkImage(
+        metadata.traits.type,
+        metadata.traits.attributes,
+        metadata.traits.background
+      )
+
+      selectedPunk.value = {
+        ...metadata,
+        imageUrl
+      }
+      selectedPunkId.value = punkId
+
+      console.log('✅ Punk loaded from escrow sales:', metadata.name)
       return
     }
 
-    // Convert compressed hex to Uint8Array
-    const compressedData = new Uint8Array(
-      mintEvent.compressedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-    )
+    // No metadata found anywhere
+    console.error('❌ Could not find punk metadata in localStorage or sales history')
+    alert('Unable to load punk details. The punk data is not available.')
 
-    // Decompress metadata
-    const metadata = decompressPunkMetadata(compressedData)
-
-    // Generate image URL from traits
-    const imageUrl = generatePunkImage(
-      metadata.traits.type,
-      metadata.traits.attributes,
-      metadata.traits.background
-    )
-
-    selectedPunk.value = {
-      ...metadata,
-      imageUrl
-    }
-    selectedPunkId.value = punkId
-
-    console.log('✅ Punk loaded from Nostr:', metadata.name)
   } catch (error) {
     console.error('Failed to load punk details:', error)
     alert('Unable to load punk details. An error occurred while fetching the data.')

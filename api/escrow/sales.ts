@@ -15,6 +15,7 @@ interface SaleResponse {
   timestamp: number // soldAt
   punkTransferTxid?: string
   paymentTransferTxid?: string
+  compressedMetadata?: string // Compressed punk metadata (hex)
 }
 
 interface StatsResponse {
@@ -59,7 +60,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         seller: listing.sellerArkAddress,
         timestamp: listing.soldAt!,
         punkTransferTxid: listing.punkTransferTxid,
-        paymentTransferTxid: listing.paymentTransferTxid
+        paymentTransferTxid: listing.paymentTransferTxid,
+        compressedMetadata: listing.compressedMetadata
       }))
       .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
 
