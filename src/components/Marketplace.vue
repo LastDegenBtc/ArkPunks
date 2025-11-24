@@ -344,7 +344,7 @@ async function loadListings() {
           const compressedData = new Uint8Array(
             listing.compressedMetadata.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16))
           )
-          metadata = decompressPunkMetadata(compressedData)
+          metadata = decompressPunkMetadata({ data: compressedData }, listing.punkId)
 
           // Generate image URL from traits
           const imageUrl = generatePunkImage(

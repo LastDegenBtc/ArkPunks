@@ -376,7 +376,7 @@ async function viewPunk(punkId: string) {
       )
 
       // Decompress metadata
-      const metadata = decompressPunkMetadata(compressedData)
+      const metadata = decompressPunkMetadata({ data: compressedData }, punkId)
 
       // Generate image URL from traits
       const imageUrl = generatePunkImage(
