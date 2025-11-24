@@ -211,15 +211,14 @@
                     📅 Expires: {{ vtxoExpirationInfo.expiryDate }}<br>
                     ⏱️ Time remaining: {{ vtxoExpirationInfo.timeRemaining }}<br>
                     <br>
-                    <em>Note: Arkade mainnet is in testing. Regular batch swaps are not running yet.<br>
-                    Your VTXOs will become recoverable after expiry. You can then use the recover button to reclaim your funds.</em>
+                    <em>Your VTXOs are currently blocked. We're working with the Arkade team to unblock them soon.<br>
+                    In the meantime, they will automatically become recoverable after expiry.</em>
                   </span>
                 </span>
                 <span v-else>
                   <br>
-                  <em>Note: Arkade mainnet is in testing. Regular batch swaps are not running yet.<br>
-                  Your VTXOs may take longer than usual to settle, or may need to wait for expiry to become recoverable.<br>
-                  Refresh your balance to check status.</em>
+                  <em>Your VTXOs are currently blocked. We're working with the Arkade team to unblock them soon.<br>
+                  Refresh your balance to check if they've been unblocked.</em>
                 </span>
               </span>
               <span v-else-if="balance.recoverable > 0n">
