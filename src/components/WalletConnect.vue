@@ -1168,6 +1168,11 @@ async function sendSats() {
         try {
           // Step 1: Try renewVtxos() first (Arkade CEO recommendation)
           console.log('   Step 1: Trying renewVtxos()...')
+
+          // Log wallet address to verify we're using the correct wallet
+          const walletAddress = await wallet.sdkWallet.getAddress()
+          console.log(`   Wallet address: ${walletAddress}`)
+
           const renewTxid = await vtxoManager.renewVtxos()
           console.log(`✅ VTXOs renewed! Txid: ${renewTxid}`)
           renewalSuccess = true
@@ -1281,6 +1286,11 @@ async function forceRecoverVtxos() {
     try {
       // First try renewVtxos() - this is what Arkade CEO recommends
       console.log('   Step 1: Trying renewVtxos()...')
+
+      // Log wallet address to verify we're using the correct wallet
+      const walletAddress = await wallet.sdkWallet.getAddress()
+      console.log(`   Wallet address: ${walletAddress}`)
+
       const renewTxid = await vtxoManager.renewVtxos()
       console.log(`✅ VTXOs renewed! Txid: ${renewTxid}`)
 

@@ -391,6 +391,11 @@ export async function createArkadeWallet(
             // Arkade CEO recommends: Use renewVtxos() to renew expiring VTXOs
             // The SDK will determine which VTXOs need renewal
             console.log('🔄 Attempting to renew expiring VTXOs...')
+
+            // Log wallet address to verify we're using the correct wallet
+            const walletAddress = await wallet.getAddress()
+            console.log(`   Wallet address: ${walletAddress}`)
+
             const txid = await vtxoManager.renewVtxos()
 
             console.log(`✅ VTXOs renewed! Txid: ${txid}`)
