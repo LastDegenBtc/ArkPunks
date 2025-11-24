@@ -44,8 +44,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('📊 Fetching sales history...')
 
     // Get all listings from blob (including sold)
-    const allListings = await getAllListingsIncludingSold()
-    console.log(`   Total listings in store: ${allListings.length}`)
+    let allListings
+    try {
+      allListings = await getAllListingsIncludingSold()
+      console.log(`   Total listings in store: ${allListings.length}`)
+    } catch (blobError: any) {
+      console.error('❌ Failed to read from Vercel Blob:', blobError.message)
+      console.error('   Error details:', blobError)
+      throw new Error(`Vercel Blob error: ${blobError.message}`)
+    }
 
     // Filter for sold listings only
     const soldListings = allListings.filter(l => l.status === 'sold' && l.soldAt && l.buyerAddress)
@@ -80,6 +87,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error: any) {
     console.error('❌ Error fetching sales:', error)
+    console.error('   Full error:', error)
+
+    // If Vercel Blob is not configured, return empty stats
+    if (error.message?.includes('Vercel Blob not configured') ||
+        error.message?.includes('BLOB_READ_WRITE_TOKEN')) {
+      console.log('⚠️ Vercel Blob not configured, returning empty stats')
+      return res.status(200).json({
+        success: true,
+        sales: [],
+        stats: {
+          floorPrice: '0',
+          highestSale: '0',
+          totalVolume: '0',
+          totalSales: 0,
+          averagePrice: '0'
+        }
+      })
+    }
+
     return res.status(500).json({
       error: 'Failed to fetch sales',
       details: error.message
