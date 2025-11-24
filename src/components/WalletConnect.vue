@@ -761,14 +761,24 @@ const punkLockedBalance = computed(() => {
   }
 })
 
-// Actual locked balance (can't exceed total balance)
-// If we have 6 punks (60k required) but only 56k total, we can only lock 56k
+// Actual locked balance (by 10k steps)
+// If we have 6 punks (60k required) but only 56k total:
+// - We can lock 5 × 10k = 50k (5 complete steps)
+// - Remaining 6k is available
 const actualLockedBalance = computed(() => {
   const calculated = punkLockedBalance.value
   const total = balance.value.total
+  const PUNK_VALUE = 10000n
 
-  // Can't lock more than we have
-  return calculated > total ? total : calculated
+  // If calculated exceeds total, lock by complete 10k steps
+  if (calculated > total) {
+    // How many complete 10k chunks fit in total balance?
+    const completeSteps = total / PUNK_VALUE
+    return completeSteps * PUNK_VALUE
+  }
+
+  // Otherwise use the calculated value
+  return calculated
 })
 
 // True available balance for minting (excludes punk VTXOs)
