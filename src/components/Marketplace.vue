@@ -52,7 +52,7 @@
           <h3>{{ punk.metadata.name }}</h3>
 
           <div class="punk-type">
-            <span class="badge" :class="`type-${punk.metadata.traits.type.toLowerCase()}`">
+            <span v-if="punk.metadata.traits?.type" class="badge" :class="`type-${punk.metadata.traits.type.toLowerCase()}`">
               {{ punk.metadata.traits.type }}
             </span>
             <span v-if="punk.isOfficial && punk.officialIndex !== undefined" class="official-index">
@@ -66,7 +66,7 @@
             </span>
           </div>
 
-          <div class="punk-attributes">
+          <div v-if="punk.metadata.traits?.attributes" class="punk-attributes">
             <span v-for="attr in punk.metadata.traits.attributes" :key="attr" class="attribute-badge">
               {{ attr }}
             </span>
@@ -165,10 +165,9 @@
 import { ref, onMounted, inject, computed } from 'vue'
 import type { ArkadeWalletInterface } from '@/utils/arkadeWallet'
 import { delistPunk } from '@/utils/marketplaceUtils'
-import { getOfficialPunksList } from '@/utils/officialPunkValidator'
 import { buyPunkFromEscrow, executeEscrowSwap, cancelEscrowListing } from '@/utils/escrowApi'
-import { decompressPunkMetadata } from '@/utils/compression'
-import { generatePunkImage } from '@/utils/generator'
+import { decompressPunkMetadata, hexToCompressed } from '@/utils/compression'
+import { generatePunkImage, generatePunkMetadata } from '@/utils/generator'
 import { getPublicKey } from 'nostr-tools'
 import { hex } from '@scure/base'
 
@@ -310,10 +309,10 @@ function previousPage() {
 async function loadListings() {
   loading.value = true
   try {
-    console.log('📋 Loading listings from marketplace server...')
+    console.log('📋 Loading listings from escrow database...')
 
-    // Get all active listings from local marketplace server
-    const response = await fetch(`${API_URL}/api/marketplace/listings`)
+    // Get all active listings from escrow database
+    const response = await fetch(`${API_URL}/api/escrow/listings`)
     if (!response.ok) {
       throw new Error(`Failed to fetch listings: ${response.statusText}`)
     }
@@ -326,40 +325,27 @@ async function loadListings() {
 
     console.log(`✅ Loaded ${data.listings.length} active listings from marketplace server`)
 
-    // Get official punks list
-    const { punkIds: officialIds } = await getOfficialPunksList()
-    const officialMap = new Map<string, number>()
-    officialIds.forEach((id, index) => {
-      officialMap.set(id, index)
-    })
-
     // Convert escrow listings to marketplace format
     const listings: MarketplaceListing[] = []
 
     for (const listing of data.listings) {
-      // Decompress metadata if available
+      // Decompress metadata from database (same as gallery does)
       let metadata
-      if (listing.compressedMetadata) {
-        try {
-          const compressedData = new Uint8Array(
-            listing.compressedMetadata.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16))
-          )
-          metadata = decompressPunkMetadata({ data: compressedData }, listing.punkId)
-
-          // Generate image URL from traits
-          const imageUrl = generatePunkImage(
-            metadata.traits.type,
-            metadata.traits.attributes,
-            metadata.traits.background
-          )
-          metadata.imageUrl = imageUrl
-        } catch (error) {
-          console.warn(`Failed to decompress metadata for punk ${listing.punkId}:`, error)
-          continue // Skip this listing if metadata can't be decompressed
+      try {
+        if (listing.compressedMetadata) {
+          // Use compressed metadata from database
+          // Convert hex string to bytes first, then decompress
+          const compressedBytes = hexToCompressed(listing.compressedMetadata)
+          metadata = decompressPunkMetadata(compressedBytes, listing.punkId)
+          console.log(`✅ Decompressed metadata for punk #${listing.punkId.slice(0, 8)}`)
+        } else {
+          // Fallback: generate from punkId if no compressed metadata
+          metadata = generatePunkMetadata(listing.punkId)
+          console.log(`⚠️  Generated metadata from punkId for #${listing.punkId.slice(0, 8)} (no compressed data)`)
         }
-      } else {
-        console.warn(`No metadata for punk ${listing.punkId}`)
-        continue // Skip this listing if no metadata
+      } catch (error) {
+        console.warn(`Failed to process metadata for punk ${listing.punkId}:`, error)
+        continue // Skip this listing if metadata can't be generated
       }
 
       listings.push({
@@ -371,8 +357,8 @@ async function loadListings() {
         saleMode: 'escrow',
         escrowAddress: listing.escrowAddress,
         metadata,
-        isOfficial: officialMap.has(listing.punkId),
-        officialIndex: officialMap.get(listing.punkId)
+        isOfficial: !!listing.serverSignature, // Official if server signature exists
+        officialIndex: undefined
       })
     }
 
@@ -647,8 +633,7 @@ async function cancelListing(punk: MarketplaceListing) {
     // Cancel the listing
     const response = await cancelEscrowListing({
       punkId: punk.punkId,
-      sellerPubkey,
-      sellerArkAddress
+      sellerAddress: sellerArkAddress
     })
 
     console.log('✅ Listing cancelled:', response)

@@ -69,8 +69,7 @@ export interface ExecuteSwapResponse {
 
 export interface CancelListingRequest {
   punkId: string
-  sellerPubkey: string
-  sellerArkAddress: string
+  sellerAddress: string
 }
 
 export interface CancelListingResponse {
@@ -87,7 +86,7 @@ export interface EscrowStatusResponse {
   count?: number
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 /**
  * Get escrow wallet information
@@ -154,7 +153,7 @@ export async function updateEscrowOutpoint(punkId: string, newVtxoOutpoint: stri
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ punkId, newVtxoOutpoint })
+    body: JSON.stringify({ punkId, punkVtxoOutpoint: newVtxoOutpoint })
   })
 
   if (!response.ok) {
@@ -217,14 +216,14 @@ export async function getEscrowStatus(punkId: string): Promise<EscrowListing> {
  * @returns Array of all escrow listings
  */
 export async function getAllEscrowListings(): Promise<EscrowListing[]> {
-  const response = await fetch(`${API_BASE_URL}/api/escrow/status`)
+  const response = await fetch(`${API_BASE_URL}/api/escrow/listings`)
 
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.error || 'Failed to get escrow listings')
   }
 
-  const data: EscrowStatusResponse = await response.json()
+  const data = await response.json()
 
   return data.listings || []
 }

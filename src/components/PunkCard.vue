@@ -17,9 +17,6 @@
         <span class="badge" :class="`type-${punk.metadata.traits.type.toLowerCase()}`">
           {{ punk.metadata.traits.type }}
         </span>
-        <span v-if="isOfficial && officialIndex !== undefined" class="official-index" title="Mint order on official relay">
-          #{{ officialIndex }}
-        </span>
       </div>
 
       <div class="punk-attributes">
@@ -44,6 +41,15 @@
       <div v-else class="punk-status">
         <span class="not-for-sale">Not for sale</span>
       </div>
+
+      <button
+        v-if="inEscrow && canCancel"
+        class="cancel-listing-btn"
+        @click.stop="$emit('cancel', punk)"
+        title="Cancel listing and retrieve your punk from escrow"
+      >
+        Cancel Listing
+      </button>
     </div>
   </div>
 </template>
@@ -56,11 +62,13 @@ interface Props {
   isOfficial?: boolean
   officialIndex?: number
   inEscrow?: boolean
+  canCancel?: boolean
 }
 
 defineProps<Props>()
 defineEmits<{
   click: [punk: PunkState]
+  cancel: [punk: PunkState]
 }>()
 
 function formatPubkey(pubkey: string): string {
@@ -243,5 +251,28 @@ function formatSats(sats: bigint): string {
   color: #666;
   font-size: 12px;
   font-style: italic;
+}
+
+.cancel-listing-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-listing-btn:hover {
+  background: #ef4444;
+  transform: translateY(-1px);
+}
+
+.cancel-listing-btn:active {
+  transform: translateY(0);
 }
 </style>

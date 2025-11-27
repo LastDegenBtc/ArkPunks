@@ -153,8 +153,18 @@ async function main() {
   `)
 
   let listingCount = 0
+  let skippedListings = 0
 
   for (const [punkId, listing] of Object.entries(listings)) {
+    // Check if punk exists (foreign key constraint)
+    const punkExists = db.prepare('SELECT 1 FROM punks WHERE punk_id = ?').get(punkId)
+
+    if (!punkExists) {
+      console.warn(`   ⚠️  Skipping listing for non-existent punk: ${punkId.slice(0, 16)}...`)
+      skippedListings++
+      continue
+    }
+
     insertListing.run(
       punkId,
       listing.sellerArkAddress,
@@ -177,6 +187,10 @@ async function main() {
     }
 
     listingCount++
+  }
+
+  if (skippedListings > 0) {
+    console.warn(`   ⚠️  Skipped ${skippedListings} listing(s) (punks not in database)`)
   }
 
   console.log(`   ✅ Imported ${listingCount} listings`)

@@ -40,6 +40,7 @@ export interface PunkState {
   vtxoOutpoint: string // txid:vout
   vtxo?: VtxoInput     // Full VTXO data if available
   inEscrow?: boolean   // true if punk is currently held in escrow
+  isOfficial?: boolean // true if punk has a server signature
 }
 
 export enum PunkAction {

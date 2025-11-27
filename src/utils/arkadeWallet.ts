@@ -527,12 +527,11 @@ export async function broadcastPunkMint(
     throw new Error(`Punk value must be at least ${params.minVtxoValue} sats`)
   }
 
-  // Get user's VTXOs for funding
-  const vtxos = await wallet.getVtxos()
-  const totalAvailable = vtxos.reduce((sum, v) => sum + BigInt(v.vtxo.amount), 0n)
+  // Check wallet balance (balance-based instead of VTXO-based)
+  const balance = await wallet.getBalance()
 
-  if (totalAvailable < punkValue) {
-    throw new Error(`Insufficient funds. Need ${punkValue} sats, have ${totalAvailable} sats`)
+  if (balance.available < punkValue) {
+    throw new Error(`Insufficient funds. Need ${punkValue} sats, have ${balance.available} sats`)
   }
 
   // TODO: Build real punk mint transaction using buildMintTransaction

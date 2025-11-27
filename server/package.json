@@ -11,9 +11,13 @@
     "import-data": "node scripts/import-from-vercel.js"
   },
   "dependencies": {
+    "@arkade-os/sdk": "^0.3.7",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
+    "@scure/base": "^2.0.0",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.21.2"
-  },
-  "devDependencies": {}
+  }
 }

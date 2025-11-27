@@ -42,6 +42,7 @@ console.log('✅ Database ready')
 /**
  * GET /api/ownership/get?punkId=...
  * Get owner of a specific punk
+ * Returns minter_pubkey (Nostr) as authoritative owner
  */
 app.get('/api/ownership/get', (req, res) => {
   try {
@@ -51,13 +52,24 @@ app.get('/api/ownership/get', (req, res) => {
       return res.status(400).json({ error: 'Missing punkId parameter' })
     }
 
-    const punk = db.prepare('SELECT owner_address FROM punks WHERE punk_id = ?').get(punkId)
+    const punk = db.prepare(`
+      SELECT minter_pubkey, owner_address, bitcoin_address
+      FROM punks
+      WHERE punk_id = ?
+    `).get(punkId)
 
     if (!punk) {
       return res.status(404).json({ error: 'Punk not found', punkId })
     }
 
-    return res.json({ punkId, owner: punk.owner_address })
+    return res.json({
+      punkId,
+      minterPubkey: punk.minter_pubkey,      // Nostr pubkey (source of truth)
+      ownerAddress: punk.owner_address,      // ark1... (cached/derived)
+      bitcoinAddress: punk.bitcoin_address,  // bc1p... (from mint event)
+      // Legacy field for backward compatibility
+      owner: punk.minter_pubkey
+    })
   } catch (error) {
     console.error('Error getting punk owner:', error)
     return res.status(500).json({ error: 'Internal server error', details: error.message })
@@ -67,20 +79,37 @@ app.get('/api/ownership/get', (req, res) => {
 /**
  * GET /api/ownership/all
  * Get all punk ownership (for migration/backup)
+ * Uses minter_pubkey as authoritative owner
  */
 app.get('/api/ownership/all', (req, res) => {
   try {
-    const punks = db.prepare('SELECT punk_id, owner_address FROM punks').all()
+    const punks = db.prepare(`
+      SELECT punk_id, minter_pubkey, owner_address, bitcoin_address
+      FROM punks
+    `).all()
 
-    const ownership = {}
+    // Build ownership maps
+    const byMinterPubkey = {}  // Nostr pubkey (source of truth)
+    const byOwnerAddress = {}  // ark1... (cached)
+    const byBitcoinAddress = {} // bc1p... (from mint)
+
     for (const punk of punks) {
-      ownership[punk.punk_id] = punk.owner_address
+      byMinterPubkey[punk.punk_id] = punk.minter_pubkey
+      if (punk.owner_address) {
+        byOwnerAddress[punk.punk_id] = punk.owner_address
+      }
+      if (punk.bitcoin_address) {
+        byBitcoinAddress[punk.punk_id] = punk.bitcoin_address
+      }
     }
 
     return res.json({
       success: true,
       count: punks.length,
-      ownership
+      ownership: byMinterPubkey,  // Default to Nostr pubkey
+      ownershipByNostrPubkey: byMinterPubkey,
+      ownershipByArkAddress: byOwnerAddress,
+      ownershipByBitcoinAddress: byBitcoinAddress
     })
   } catch (error) {
     console.error('Error getting all ownership:', error)
@@ -397,8 +426,36 @@ app.get('/api/marketplace/sales', (req, res) => {
 // =============================================================================
 
 /**
+ * GET /api/supply
+ * Get punk supply information
+ * Compatible with existing Vercel /api/supply endpoint
+ */
+app.get('/api/supply', (req, res) => {
+  try {
+    const totalMinted = db.prepare('SELECT COUNT(*) as count FROM punks').get().count
+    const maxPunks = 2016 // Total supply cap
+
+    return res.json({
+      totalMinted,
+      maxPunks,
+      cached: false,
+      cacheAge: 0,
+      source: 'sqlite'
+    })
+  } catch (error) {
+    console.error('Error getting supply:', error)
+    return res.status(500).json({
+      error: 'Failed to fetch supply',
+      details: error.message,
+      totalMinted: 0,
+      maxPunks: 2016
+    })
+  }
+})
+
+/**
  * GET /api/stats
- * General statistics
+ * General statistics including ownership breakdown
  */
 app.get('/api/stats', (req, res) => {
   try {
@@ -406,11 +463,35 @@ app.get('/api/stats', (req, res) => {
     const activeListings = db.prepare('SELECT COUNT(*) as count FROM listings WHERE status IN (\'pending\', \'deposited\')').get().count
     const totalSales = db.prepare('SELECT COUNT(*) as count FROM sales').get().count
 
+    // Get unique owners count
+    const uniqueOwners = db.prepare('SELECT COUNT(DISTINCT owner_address) as count FROM punks').get().count
+
+    // Get top holders (top 10 owners by punk count)
+    const topHolders = db.prepare(`
+      SELECT owner_address, COUNT(*) as punk_count
+      FROM punks
+      GROUP BY owner_address
+      ORDER BY punk_count DESC
+      LIMIT 10
+    `).all()
+
     return res.json({
       success: true,
-      totalPunks,
-      activeListings,
-      totalSales
+      supply: {
+        totalMinted: totalPunks,
+        maxSupply: 2016
+      },
+      marketplace: {
+        activeListings,
+        totalSales
+      },
+      ownership: {
+        uniqueOwners,
+        topHolders: topHolders.map(h => ({
+          address: h.owner_address,
+          punkCount: h.punk_count
+        }))
+      }
     })
   } catch (error) {
     console.error('Error getting stats:', error)

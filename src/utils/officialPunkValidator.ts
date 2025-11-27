@@ -41,7 +41,7 @@ async function getAutoWhitelist(): Promise<Set<string>> {
   try {
     const response = await fetch('/api/whitelist/list')
     if (!response.ok) {
-      console.warn('⚠️ Failed to fetch auto-whitelist from API')
+      // Silently fail - auto-whitelist is optional
       return new Set()
     }
 
@@ -58,7 +58,8 @@ async function getAutoWhitelist(): Promise<Set<string>> {
 
     return punkIds
   } catch (error) {
-    console.warn('⚠️ Failed to fetch auto-whitelist:', error)
+    // Silently fail in local dev - auto-whitelist endpoint doesn't exist locally
+    // This is expected behavior and doesn't affect functionality
     return new Set()
   }
 }

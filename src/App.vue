@@ -38,8 +38,8 @@
               <h2>Punk Gallery</h2>
               <p class="subtitle">Your personal collection</p>
             </div>
-            <button @click="refreshGallery" class="btn-refresh" :disabled="refreshing">
-              {{ refreshing ? '🔄 Refreshing...' : '🔄 Refresh' }}
+            <button @click="refreshGallery" class="btn-refresh">
+              🔄 Refresh
             </button>
           </div>
 
@@ -48,31 +48,23 @@
           </div>
 
           <div v-else class="punk-grid">
-            <div v-for="punk in samplePunks" :key="`${punk.punkId}-${officialPunksMap.size}`" class="punk-card-wrapper">
+            <div v-for="punk in samplePunks" :key="punk.punkId" class="punk-card-wrapper">
               <PunkCard
                 :punk="punk"
-                :is-official="isOfficialPunk(punk.punkId)"
-                :official-index="getOfficialIndex(punk.punkId)"
+                :is-official="punk.isOfficial"
                 :in-escrow="isPunkInEscrow(punk.punkId)"
+                :can-cancel="isPunkInEscrow(punk.punkId)"
+                @cancel="delistPunkFromMarket"
               />
               <div class="punk-actions">
                 <button
-                  v-if="!listedPunkIds.has(punk.punkId)"
+                  v-if="!isPunkInEscrow(punk.punkId)"
                   @click="listPunk(punk)"
                   class="btn-action btn-list"
                   :disabled="isMaintenanceMode"
                   :title="isMaintenanceMode ? 'Marketplace is under maintenance' : 'List this punk for sale'"
                 >
                   💰 List for Sale
-                </button>
-                <button
-                  v-else
-                  @click="delistPunkFromMarket(punk)"
-                  class="btn-action btn-delist"
-                  :disabled="isMaintenanceMode"
-                  :title="isMaintenanceMode ? 'Marketplace is under maintenance' : 'Remove this punk from marketplace'"
-                >
-                  🗑️ Delist
                 </button>
               </div>
             </div>
@@ -117,12 +109,9 @@ import FAQ from './components/FAQ.vue'
 import { PunkState } from './types/punk'
 import { generatePunkMetadata } from './utils/generator'
 import type { ArkadeWalletInterface } from './utils/arkadeWallet'
-import { getOfficialPunksList } from './utils/officialPunkValidator'
-import { listPunkForSale, delistPunk, getMarketplaceListings, getSoldPunkIds, syncPunksFromNostr, publishPunkTransfer } from './utils/marketplaceUtils'
 import { compressPunkMetadata } from './utils/compression'
-import { autoSubmitLocalPunks } from './utils/autoWhitelist'
 import { hex } from '@scure/base'
-import { getPublicKey, nip19 } from 'nostr-tools'
+import { getPublicKey } from 'nostr-tools' // Only for crypto (deriving pubkey from private key)
 import { PUNK_SUPPLY_CONFIG, getActiveConfig } from './config/arkade'
 
 const walletConnectRef = ref<any>()
@@ -154,21 +143,15 @@ const isMarketplaceAvailable = computed(() => {
 const currentView = ref<'gallery' | 'marketplace' | 'stats' | 'faq'>('gallery')
 const selectedPunk = ref<PunkState | null>(null)
 
-// Track which punks are currently listed
-const listedPunkIds = ref<Set<string>>(new Set())
-
-// Track refreshing state
-const refreshing = ref(false)
-
 // Provide wallet getter to child components
 provide('getWallet', (): ArkadeWalletInterface | null => {
   return walletConnectRef.value?.getWallet?.() || null
 })
 
 // Provide reload function to child components
-// Use loadPunksFromLocalStorage() to avoid re-filtering after Nostr sync
+// Use loadPunksSmartly() for automatic database migration and loading
 provide('reloadPunks', async () => {
-  await loadPunksFromLocalStorage()
+  await loadPunksSmartly()
 })
 
 // Provide function to refresh punk locked balance
@@ -189,11 +172,17 @@ const samplePunks = computed(() => {
   console.log('🔍 Gallery Debug:')
   console.log('   Current wallet address:', currentWalletAddress.value)
   console.log('   All punks count:', allPunks.value.length)
-  console.log('   All punks:', allPunks.value.map(p => ({ punkId: p.punkId, owner: p.owner })))
 
   if (!currentWalletAddress.value) {
     console.log('   ❌ No wallet connected - gallery will be empty')
     return []
+  }
+
+  // Debug: Show first punk's owner for comparison
+  if (allPunks.value.length > 0) {
+    console.log('   📋 First punk owner:', allPunks.value[0].owner)
+    console.log('   🔑 Wallet address:', currentWalletAddress.value)
+    console.log('   ✅ Match?', allPunks.value[0].owner === currentWalletAddress.value)
   }
 
   const filtered = allPunks.value.filter(punk => {
@@ -212,57 +201,359 @@ const samplePunks = computed(() => {
   })
 
   console.log('   ✅ Filtered punks for this wallet:', filtered.length)
-  console.log('   📊 Official punks map size in gallery:', officialPunksMap.value.size)
-
-  // Debug: Check which filtered punks are official
-  if (filtered.length > 0 && officialPunksMap.value.size > 0) {
-    console.log('   🔍 Checking which gallery punks are official:')
-    filtered.forEach(punk => {
-      const isOff = officialPunksMap.value.has(punk.punkId)
-      const idx = officialPunksMap.value.get(punk.punkId)
-      console.log(`      ${punk.punkId.slice(0, 8)}... → ${isOff ? `✅ Official #${idx}` : '❌ Not official'}`)
-    })
-  }
 
   return filtered
 })
 
-// Official punks list from Nostr authority relay
-const officialPunkIds = ref<string[]>([])
-const officialPunksMap = ref<Map<string, number>>(new Map())
-
 // Escrow pubkey for detecting punks in escrow
 const escrowPubkey = ref<string>('')
 
-// Load all punks from localStorage (with sold punk filtering for normal loads)
+// Load all punks from localStorage (NO LONGER USED - keeping for reference)
+// Use loadPunksFromLocalStorage() instead
 async function loadPunks() {
+  console.warn('loadPunks() is deprecated, use loadPunksFromLocalStorage() instead')
+  await loadPunksFromLocalStorage()
+}
+
+// ============================================================
+// DATABASE MIGRATION & LOADING
+// ============================================================
+
+const API_URL = 'http://localhost:3001'
+
+/**
+ * Check if wallet is registered in database
+ */
+async function checkWalletRegistration(address: string): Promise<boolean> {
   try {
-    const punksJson = localStorage.getItem('arkade_punks')
-    if (punksJson) {
-      let punks = JSON.parse(punksJson)
+    const response = await fetch(`${API_URL}/api/wallet/status?address=${encodeURIComponent(address)}`)
+    const data = await response.json()
+    return data.isRegistered || false
+  } catch (error) {
+    console.error('Failed to check wallet registration:', error)
+    return false
+  }
+}
 
-      // Check if any punks have been sold (for sellers)
-      // This filters punks that were sold on marketplace
-      const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-      if (privateKeyHex) {
-        const myPubkey = getPublicKey(hex.decode(privateKeyHex))
-        const soldPunkIds = await getSoldPunkIds(myPubkey)
+/**
+ * Migrate localStorage punks to database (ONE-TIME operation)
+ */
+async function migrateLocalStorageToDatabase(address: string): Promise<boolean> {
+  console.log('🔄 Starting localStorage → database migration...')
 
-        if (soldPunkIds.size > 0) {
-          const punksBefore = punks.length
-          punks = punks.filter((p: any) => !soldPunkIds.has(p.punkId))
-          const punksRemoved = punksBefore - punks.length
+  try {
+    // Read punks from localStorage
+    const stored = localStorage.getItem('arkade_punks')
+    let punks = stored ? JSON.parse(stored) : []
 
-          if (punksRemoved > 0) {
-            // Update localStorage
-            localStorage.setItem('arkade_punks', JSON.stringify(punks, (key, value) =>
-              typeof value === 'bigint' ? value.toString() : value
-            ))
-          }
+    // Also check arkade-wallet format
+    if (punks.length === 0) {
+      const walletJson = localStorage.getItem('arkade-wallet')
+      if (walletJson) {
+        const walletData = JSON.parse(walletJson)
+        punks = walletData.punks || []
+      }
+    }
+
+    if (punks.length === 0) {
+      console.log('✅ No punks to migrate')
+      return true
+    }
+
+    console.log(`📦 Found ${punks.length} punks in localStorage`)
+
+    // Prepare punks for registration with compressed metadata
+    const { compressPunkMetadata, compressedToHex } = await import('./utils/compression')
+    const { generatePunkMetadata } = await import('./utils/generator')
+
+    const punksToRegister = punks.map((punk: any) => {
+      // Get metadata: use existing if available, otherwise generate from punkId
+      const metadata = punk.metadata || generatePunkMetadata(punk.punkId)
+
+      // Compress metadata
+      const compressed = compressPunkMetadata(metadata)
+      const compressedHex = compressedToHex(compressed)
+
+      return {
+        punkId: punk.punkId,
+        mintDate: punk.mintDate,
+        compressedMetadata: compressedHex
+      }
+    })
+
+    console.log(`🗜️  Compressed metadata for ${punksToRegister.length} punks`)
+
+    // Get wallet's Bitcoin address to help resolve same-wallet conflicts
+    const wallet = walletConnectRef.value?.getWallet?.()
+    const bitcoinAddress = wallet?.address || null
+
+    // Register in database
+    const response = await fetch(`${API_URL}/api/wallet/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address,
+        bitcoinAddress, // Send Bitcoin address to help resolve same-wallet conflicts
+        punks: punksToRegister
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`Registration failed: ${response.statusText}`)
+    }
+
+    const result = await response.json()
+    console.log('✅ Migration complete:', result.summary)
+    console.log(`   Registered: ${result.summary.registered}`)
+    console.log(`   Updated: ${result.summary.updated}`)
+    console.log(`   Conflicts: ${result.summary.conflicts}`)
+
+    if (result.summary.conflicts > 0) {
+      console.warn('⚠️  Some punks had ownership conflicts:', result.results.conflicts)
+    }
+
+    // Clear localStorage punk data - database is now the source of truth
+    console.log('🗑️  Clearing localStorage punk data (migrated to database)...')
+    localStorage.removeItem('arkade_punks')
+    console.log('✅ localStorage cleared - database is now the single source of truth')
+
+    return true
+  } catch (error) {
+    console.error('❌ Migration failed:', error)
+    return false
+  }
+}
+
+/**
+ * Load punks from database and decompress metadata
+ */
+async function loadPunksFromDatabase(address: string): Promise<PunkState[]> {
+  console.log('📥 Loading punks from database...')
+
+  try {
+    const response = await fetch(`${API_URL}/api/punks/owner?address=${encodeURIComponent(address)}`)
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch punks: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    const dbPunks = data.punks || []
+
+    console.log(`📦 Fetched ${dbPunks.length} punks from database`)
+
+    if (dbPunks.length === 0) {
+      return []
+    }
+
+    // Decompress metadata for each punk
+    const { hexToCompressed, decompressPunkMetadata } = await import('./utils/compression')
+
+    const punks: PunkState[] = []
+
+    for (const dbPunk of dbPunks) {
+      try {
+        // Decompress metadata if available
+        if (dbPunk.punk_metadata_compressed) {
+          const compressed = hexToCompressed(dbPunk.punk_metadata_compressed)
+          const metadata = decompressPunkMetadata(compressed, dbPunk.punk_id)
+
+          punks.push({
+            punkId: dbPunk.punk_id,
+            owner: dbPunk.owner_address,
+            metadata,
+            vtxoOutpoint: `${dbPunk.punk_id}:0`, // Placeholder, not stored in DB
+            mintDate: dbPunk.minted_at ? new Date(dbPunk.minted_at).toISOString() : new Date().toISOString(),
+            inEscrow: false, // Will be updated by escrow sync below
+            isOfficial: !!dbPunk.server_signature // Official if server signature exists
+          })
+        } else {
+          console.warn(`⚠️  Punk ${dbPunk.punk_id.slice(0, 8)} has no compressed metadata, skipping`)
+        }
+      } catch (error) {
+        console.error(`Failed to decompress punk ${dbPunk.punk_id.slice(0, 8)}:`, error)
+      }
+    }
+
+    console.log(`✅ Decompressed ${punks.length} punks`)
+
+    // Sync escrow flags from server
+    try {
+      console.log('🔄 Syncing escrow state from server...')
+      const escrowResponse = await fetch(`${API_URL}/api/escrow/listings`)
+      const escrowData = await escrowResponse.json()
+      const escrowListings = escrowData.listings || []
+
+      console.log(`   Found ${escrowListings.length} escrow listing(s) on server`)
+
+      // Mark punks as in escrow
+      for (const punk of punks) {
+        const listing = escrowListings.find((l: any) => l.punkId === punk.punkId)
+        if (listing) {
+          punk.inEscrow = true
+          punk.listingPrice = BigInt(listing.price)
+          console.log(`   ✅ Punk ${punk.punkId.slice(0, 8)} is in escrow (${listing.price} sats)`)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync escrow state:', error)
+    }
+
+    return punks
+  } catch (error) {
+    console.error('❌ Failed to load punks from database:', error)
+    throw error
+  }
+}
+
+/**
+ * Smart punk loading: checks registration status and loads accordingly
+ */
+async function loadPunksSmartly() {
+  console.log('🧠 Smart punk loading started...')
+
+  const wallet = walletConnectRef.value?.getWallet?.()
+  if (!wallet?.address) {
+    console.log('   No wallet connected, loading from localStorage as fallback')
+    await loadPunksFromLocalStorage()
+    return
+  }
+
+  // IMPORTANT: Use Ark address for database queries (not Bitcoin address)
+  const address = wallet.arkadeAddress || wallet.address
+  console.log(`   Wallet Ark address: ${address.slice(0, 20)}...`)
+
+  try {
+    // Check if wallet is registered in database
+    const isRegistered = await checkWalletRegistration(address)
+    console.log(`   Registered in database: ${isRegistered}`)
+
+    if (!isRegistered) {
+      // First-time user: migrate localStorage → database
+      console.log('🆕 First-time user detected - starting migration...')
+      const migrationSuccess = await migrateLocalStorageToDatabase(address)
+
+      if (!migrationSuccess) {
+        console.warn('⚠️  Migration failed, falling back to localStorage')
+        await loadPunksFromLocalStorage()
+        return
+      }
+
+      console.log('✅ Migration successful!')
+    }
+
+    // Load from database (works for both newly registered and existing users)
+    const punks = await loadPunksFromDatabase(address)
+
+    // Edge case: If registered but database returned no/few punks, check if localStorage has more
+    // This happens when punks were registered without compressed metadata
+    if (isRegistered && punks.length === 0) {
+      console.warn('⚠️  Registered but no valid punks in database - checking localStorage...')
+
+      // Count punks in localStorage
+      const stored = localStorage.getItem('arkade_punks')
+      let localPunks = stored ? JSON.parse(stored) : []
+
+      if (localPunks.length === 0) {
+        const walletJson = localStorage.getItem('arkade-wallet')
+        if (walletJson) {
+          const walletData = JSON.parse(walletJson)
+          localPunks = walletData.punks || []
         }
       }
 
-      // Deduplicate by punkId (in case there are duplicates in localStorage)
+      if (localPunks.length > 0) {
+        console.log(`📦 Found ${localPunks.length} punks in localStorage - triggering re-migration...`)
+        const migrationSuccess = await migrateLocalStorageToDatabase(address)
+
+        if (migrationSuccess) {
+          console.log('✅ Re-migration successful, reloading from database...')
+          const updatedPunks = await loadPunksFromDatabase(address)
+          allPunks.value = updatedPunks
+          console.log(`✅ Loaded ${updatedPunks.length} punks from database after re-migration`)
+          return
+        } else {
+          console.warn('⚠️  Re-migration failed, falling back to localStorage')
+          await loadPunksFromLocalStorage()
+          return
+        }
+      }
+    }
+
+    allPunks.value = punks
+    console.log(`✅ Loaded ${punks.length} punks from database`)
+
+    // Clear localStorage punk data after successful database load
+    // Database is now the source of truth
+    if (localStorage.getItem('arkade_punks')) {
+      console.log('🗑️  Clearing stale localStorage punk data...')
+      localStorage.removeItem('arkade_punks')
+      console.log('✅ localStorage cleared - database is the source of truth')
+    }
+
+  } catch (error) {
+    console.error('❌ Smart loading failed, falling back to localStorage:', error)
+    await loadPunksFromLocalStorage()
+  }
+}
+
+// Load punks from localStorage WITHOUT filtering (LEGACY - kept for fallback)
+// This is needed because syncPunksFromNostr() already handles all ownership logic
+async function loadPunksFromLocalStorage() {
+  console.log('🔵 loadPunksFromLocalStorage() CALLED')
+  try {
+    let punks = []
+
+    // First try arkade_punks (Nostr sync format)
+    const punksJson = localStorage.getItem('arkade_punks')
+    console.log('   arkade_punks exists?', !!punksJson)
+    if (punksJson) {
+      punks = JSON.parse(punksJson)
+      console.log(`📦 Loaded ${punks.length} punks from arkade_punks`)
+
+      // Check if owners are valid - if not, reload from arkade-wallet
+      const hasInvalidOwners = punks.length > 0 && punks.some((p: any) => !p.owner)
+      if (hasInvalidOwners) {
+        console.warn('⚠️ arkade_punks has undefined owners, reloading from arkade-wallet...')
+        localStorage.removeItem('arkade_punks')
+        punks = []
+      }
+    }
+
+    // If no punks, try loading from arkade-wallet (imported wallet format)
+    console.log('   Checking arkade-wallet... (punks.length:', punks.length, ')')
+    if (punks.length === 0) {
+      const walletJson = localStorage.getItem('arkade-wallet')
+      console.log('   arkade-wallet exists?', !!walletJson)
+      if (walletJson) {
+        const walletData = JSON.parse(walletJson)
+        const walletPunks = walletData.punks || []
+        const walletAddress = walletData.address || walletData.wallet?.address
+
+        console.log(`📦 Loaded ${walletPunks.length} punks from arkade-wallet`)
+
+        // Convert wallet punks to app format and set owner
+        punks = walletPunks.map((punk: any) => ({
+          punkId: punk.punkId,
+          owner: walletAddress, // Set owner to wallet address
+          metadata: punk.metadata || punk,
+          vtxoOutpoint: punk.vtxoOutpoint || `${punk.punkId}:0`,
+          mintDate: punk.mintDate,
+          inEscrow: punk.inEscrow || false
+        }))
+
+        // Save to arkade_punks for future loads
+        if (punks.length > 0) {
+          localStorage.setItem('arkade_punks', JSON.stringify(punks, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+          ))
+          console.log(`💾 Saved ${punks.length} punks to arkade_punks`)
+        }
+      }
+    }
+
+    if (punks.length > 0) {
+      // Deduplicate by punkId
       const uniquePunksMap = new Map()
       for (const punk of punks) {
         if (!uniquePunksMap.has(punk.punkId)) {
@@ -270,50 +561,52 @@ async function loadPunks() {
         }
       }
       const uniquePunks = Array.from(uniquePunksMap.values())
+
+      // Sync escrow flags from server database
+      try {
+        console.log('🔄 Syncing escrow state from server...')
+        const escrowResponse = await fetch('http://localhost:3001/api/escrow/listings')
+        const escrowData = await escrowResponse.json()
+        const escrowListings = escrowData.listings || []
+
+        console.log(`   Found ${escrowListings.length} escrow listing(s) on server`)
+
+        // Create set of punk IDs that are in escrow (status: pending or deposited)
+        const escrowPunkIds = new Set(
+          escrowListings
+            .filter((l: any) => l.status === 'deposited' || l.status === 'pending')
+            .map((l: any) => l.punk_id)
+        )
+
+        console.log(`   ${escrowPunkIds.size} punk(s) currently in escrow`)
+
+        // Update inEscrow flags based on server data
+        let updated = false
+        uniquePunks.forEach((p: any) => {
+          const shouldBeInEscrow = escrowPunkIds.has(p.punkId)
+          if (p.inEscrow !== shouldBeInEscrow) {
+            console.log(`   ${shouldBeInEscrow ? '🛡️ Marking' : '✅ Unmarking'} punk ${p.punkId?.slice(0, 8)}... as ${shouldBeInEscrow ? 'in escrow' : 'not in escrow'}`)
+            p.inEscrow = shouldBeInEscrow
+            updated = true
+          }
+        })
+
+        if (updated) {
+          localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+          ))
+          console.log('✅ Escrow flags synced from server')
+        } else {
+          console.log('✅ Escrow flags already in sync')
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to sync escrow state from server:', error)
+        // Continue anyway - don't block loading
+      }
 
       // If we found duplicates, clean up localStorage
       if (uniquePunks.length < punks.length) {
         console.warn(`⚠️ Found ${punks.length - uniquePunks.length} duplicate punks in localStorage, cleaning up...`)
-        localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks, (key, value) =>
-          typeof value === 'bigint' ? value.toString() : value
-        ))
-      }
-
-      allPunks.value = uniquePunks.map((data: any) => ({
-        punkId: data.punkId,
-        owner: data.owner || '', // Use owner from localStorage
-        // Handle both formats: new (with metadata field) and old (metadata spread at root)
-        metadata: data.metadata || data,
-        listingPrice: 10000n,
-        vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`,
-        inEscrow: data.inEscrow || false
-      }))
-    }
-  } catch (error) {
-    console.error('Failed to load punks:', error)
-  }
-}
-
-// Load punks from localStorage WITHOUT filtering (used after Nostr sync)
-// This is needed because syncPunksFromNostr() already handles all ownership logic
-async function loadPunksFromLocalStorage() {
-  try {
-    const punksJson = localStorage.getItem('arkade_punks')
-    if (punksJson) {
-      const punks = JSON.parse(punksJson)
-
-      // Deduplicate by punkId (in case there are duplicates in localStorage)
-      const uniquePunksMap = new Map()
-      for (const punk of punks) {
-        if (!uniquePunksMap.has(punk.punkId)) {
-          uniquePunksMap.set(punk.punkId, punk)
-        }
-      }
-      const uniquePunks = Array.from(uniquePunksMap.values())
-
-      // If we found duplicates, clean up localStorage
-      if (uniquePunks.length < punks.length) {
-        console.warn(`⚠️ Found ${punks.length - uniquePunks.length} duplicate punks in localStorage (Nostr sync), cleaning up...`)
         localStorage.setItem('arkade_punks', JSON.stringify(uniquePunks, (key, value) =>
           typeof value === 'bigint' ? value.toString() : value
         ))
@@ -334,6 +627,9 @@ async function loadPunksFromLocalStorage() {
         }
         return punk
       })
+      console.log(`✅ loadPunksFromLocalStorage: Set allPunks to ${allPunks.value.length} punks`)
+    } else {
+      console.log('   No punks found in localStorage')
     }
   } catch (error) {
     console.error('Failed to load punks from localStorage:', error)
@@ -342,210 +638,72 @@ async function loadPunksFromLocalStorage() {
 
 // Update current wallet address
 function updateWalletAddress() {
+  // Try to get wallet from WalletConnect component first
   const wallet = walletConnectRef.value?.getWallet?.()
-  currentWalletAddress.value = wallet?.address || null
+
+  // Fallback to localStorage if wallet not loaded in component yet
+  if (!wallet?.address) {
+    try {
+      const storedWallet = localStorage.getItem('arkade-wallet')
+      if (storedWallet) {
+        const walletData = JSON.parse(storedWallet)
+        // IMPORTANT: Use Ark address for punk ownership (not Bitcoin address)
+        const address = walletData.arkadeAddress || walletData.wallet?.arkadeAddress
+        if (address) {
+          currentWalletAddress.value = address
+          lastLoggedAddress.value = address
+          return
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to read wallet from localStorage:', error)
+    }
+  }
+
+  // IMPORTANT: Use Ark address for punk ownership (not Bitcoin address)
+  currentWalletAddress.value = wallet?.arkadeAddress || wallet?.address || null
   lastLoggedAddress.value = currentWalletAddress.value
 }
 
 // Watch for wallet changes
-watch(() => walletConnectRef.value?.getWallet?.()?.address, () => {
+watch(() => walletConnectRef.value?.getWallet?.()?.address, async (newAddress, oldAddress) => {
   updateWalletAddress()
+
+  // Load punks from database when wallet connects or switches
+  if (newAddress && newAddress !== oldAddress) {
+    console.log('💡 Wallet connected/changed, loading punks from database...')
+    await loadPunksSmartly()
+  }
 })
 
-// Load official punks list from Nostr
-async function loadOfficialPunks() {
-  try {
-    const { punkIds } = await getOfficialPunksList()
-    officialPunkIds.value = punkIds
-
-    // Create map for O(1) lookup
-    const map = new Map<string, number>()
-    punkIds.forEach((id, index) => {
-      map.set(id, index)
-    })
-    officialPunksMap.value = map
-
-    console.log(`✅ Loaded ${punkIds.length} official punks from authority relay`)
-    console.log(`📊 Official punks map size: ${officialPunksMap.value.size}`)
-
-    // Debug: Check if user's punks are in the official list
-    const userPunkIds = samplePunks.value.map(p => p.punkId)
-    const officialUserPunks = userPunkIds.filter(id => map.has(id))
-    console.log(`🔍 User has ${officialUserPunks.length}/${userPunkIds.length} official punks in gallery`)
-    if (officialUserPunks.length > 0) {
-      console.log(`   Official punk IDs: ${officialUserPunks.map(id => id.slice(0, 8)).join(', ')}...`)
-    }
-  } catch (error) {
-    console.error('Failed to load official punks:', error)
+// Computed map of punk escrow status (cached to avoid multiple calls)
+const punkEscrowStatus = computed(() => {
+  const map = new Map<string, boolean>()
+  for (const punk of allPunks.value) {
+    map.set(punk.punkId, punk.inEscrow === true)
   }
-}
-
-// Check if a punk is official
-function isOfficialPunk(punkId: string): boolean {
-  const isOfficial = officialPunksMap.value.has(punkId)
-  // Debug: Log when checking official status
-  if (isOfficial) {
-    console.log(`   🎯 Punk ${punkId.slice(0, 8)}... IS official (map size: ${officialPunksMap.value.size})`)
-  }
-  return isOfficial
-}
-
-// Get official index (0-999) for a punk
-function getOfficialIndex(punkId: string): number | undefined {
-  return officialPunksMap.value.get(punkId)
-}
+  return map
+})
 
 // Check if punk is currently held in escrow
 function isPunkInEscrow(punkId: string): boolean {
-  const punk = allPunks.value.find(p => p.punkId === punkId)
-  console.log(`🔍 isPunkInEscrow(${punkId.slice(0, 8)}...): punk found=${!!punk}, inEscrow=${punk?.inEscrow}`)
-  return punk?.inEscrow === true
+  return punkEscrowStatus.value.get(punkId) === true
 }
 
-// Load marketplace listings to check which punks are listed
-async function loadMarketplaceListings() {
-  try {
-    const listings = await getMarketplaceListings()
-
-    // Get Nostr pubkey from wallet private key
-    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    if (!privateKeyHex) {
-      return
-    }
-
-    const myPubkey = getPublicKey(hex.decode(privateKeyHex))
-    console.log('🔑 My Nostr pubkey:', myPubkey)
-
-    // Only track listings from current wallet (compare Nostr pubkeys)
-    const myListings = listings.filter(l => l.owner === myPubkey)
-    listedPunkIds.value = new Set(myListings.map(l => l.punkId))
-
-    console.log(`📋 My listings: ${myListings.length}`)
-  } catch (error) {
-    console.error('Failed to load marketplace listings:', error)
-  }
-}
-
-// Refresh gallery - reload punks and marketplace listings from Nostr
+// Refresh gallery - reload punks from database (or localStorage for fallback)
 async function refreshGallery() {
-  refreshing.value = true
-  let added = 0
-  let removed = 0
-  let totalSynced = 0
-
   try {
-    console.log('🔄 Refreshing gallery from Nostr...')
-
-    // Get wallet and pubkey for sync
-    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    const wallet = walletConnectRef.value?.getWallet?.()
-
-    if (privateKeyHex && wallet) {
-      const myPubkey = getPublicKey(hex.decode(privateKeyHex))
-
-      // Sync punks from Nostr (recovers all minted/bought punks)
-      const nostrPunks = await syncPunksFromNostr(myPubkey, wallet.address)
-      totalSynced = nostrPunks.length
-
-      // Get existing localStorage punks BEFORE sync
-      const punksJson = localStorage.getItem('arkade_punks')
-      const existingPunks = punksJson ? JSON.parse(punksJson) : []
-
-      // IMPORTANT: Nostr is the ONLY source of truth
-      // Replace localStorage entirely with Nostr data (no merge!)
-      // This prevents "phantom punks" on different devices
-      localStorage.setItem('arkade_punks', JSON.stringify(nostrPunks, (key, value) =>
-        typeof value === 'bigint' ? value.toString() : value
-      ))
-
-      // Count changes
-      added = nostrPunks.filter(np =>
-        !existingPunks.find((ep: any) => ep.punkId === np.punkId)
-      ).length
-
-      removed = existingPunks.filter((ep: any) =>
-        !nostrPunks.find(np => np.punkId === ep.punkId)
-      ).length
-
-      console.log(`✅ Synced ${nostrPunks.length} punks from Nostr (${added} added, ${removed} removed phantom punks)`)
-    }
-
-    // Load punks directly from localStorage WITHOUT filtering sold punks
-    // because syncPunksFromNostr() already handles ownership correctly
-    await loadPunksFromLocalStorage()
-    await loadMarketplaceListings()
+    console.log('🔄 Refreshing gallery...')
+    await loadPunksSmartly()
     console.log('✅ Gallery refreshed successfully')
-
-    // Show feedback to user
-    if (added > 0 || removed > 0) {
-      let message = `✅ Gallery refreshed!\n\nTotal punks: ${totalSynced}`
-      if (added > 0) {
-        message += `\n+ ${added} punk${added === 1 ? '' : 's'} recovered`
-      }
-      if (removed > 0) {
-        message += `\n- ${removed} phantom punk${removed === 1 ? '' : 's'} removed`
-      }
-      alert(message)
-    } else {
-      alert(`✅ Gallery refreshed!\n\nTotal punks: ${totalSynced}\nAlready in sync.`)
-    }
+    alert(`✅ Gallery refreshed!`)
   } catch (error) {
     console.error('Failed to refresh gallery:', error)
     alert('❌ Failed to refresh gallery. Check console for details.')
-  } finally {
-    refreshing.value = false
   }
 }
 
-// Check if a punk was already sold on the marketplace
-async function isPunkSold(punkId: string, myPubkey: string): Promise<{ sold: boolean, buyerPubkey?: string }> {
-  const { SimplePool } = await import('nostr-tools')
-  const pool = new SimplePool()
-  const RELAYS = [
-    'wss://relay.damus.io',
-    'wss://nos.lol',
-    'wss://nostr.wine',
-    'wss://relay.snort.social'
-  ]
-  const KIND_PUNK_SOLD = 1402 // Mainnet launch event kind
-
-  try {
-    // Query for sold events for this specific punk
-    const soldEvents = await pool.querySync(RELAYS, {
-      kinds: [KIND_PUNK_SOLD],
-      '#punk_id': [punkId],
-      limit: 100
-    })
-
-    // Find the most recent sold event where I was the seller
-    let mostRecentSale: any = null
-    for (const event of soldEvents) {
-      const sellerTag = event.tags.find(t => t[0] === 'seller')
-      if (sellerTag && sellerTag[1] === myPubkey) {
-        if (!mostRecentSale || event.created_at > mostRecentSale.created_at) {
-          mostRecentSale = event
-        }
-      }
-    }
-
-    if (mostRecentSale) {
-      const buyerTag = mostRecentSale.tags.find(t => t[0] === 'buyer')
-      return {
-        sold: true,
-        buyerPubkey: buyerTag?.[1]
-      }
-    }
-
-    return { sold: false }
-  } catch (error) {
-    console.error('Failed to check if punk was sold:', error)
-    return { sold: false }
-  } finally {
-    pool.close(RELAYS)
-  }
-}
-
-// Delist a punk from the marketplace
+// Delist a punk from the marketplace (escrow-only)
 async function delistPunkFromMarket(punk: PunkState) {
   const wallet = walletConnectRef.value?.getWallet?.()
 
@@ -554,204 +712,47 @@ async function delistPunkFromMarket(punk: PunkState) {
     return
   }
 
+  // Only works for escrow punks
+  if (!punk.inEscrow) {
+    alert('This punk is not in escrow')
+    return
+  }
+
+  const confirmed = confirm(`Remove ${punk.metadata.name} from marketplace?`)
+  if (!confirmed) return
+
   try {
-    // Get private key from localStorage
-    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    if (!privateKeyHex) {
-      throw new Error('Private key not found')
+    console.log('📦 Cancelling escrow listing...')
+    const { cancelEscrowListing } = await import('./utils/escrowApi')
+    const arkAddress = wallet.arkadeAddress || ''
+
+    await cancelEscrowListing({
+      punkId: punk.punkId,
+      sellerAddress: arkAddress
+    })
+
+    alert(`✅ ${punk.metadata.name} removed from marketplace!`)
+    console.log('✅ Escrow cancelled, collateral returned')
+
+    // Clear escrow flag in localStorage
+    const punkIndex = allPunks.value.findIndex(p => p.punkId === punk.punkId)
+    if (punkIndex !== -1) {
+      allPunks.value[punkIndex].inEscrow = false
+      allPunks.value[punkIndex].listingPrice = 0n
+      localStorage.setItem('arkade_punks', JSON.stringify(allPunks.value, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+      ))
+      console.log(`✅ Cleared escrow flag for punk ${punk.punkId.slice(0, 8)}...`)
     }
 
-    const myPubkey = getPublicKey(hex.decode(privateKeyHex))
-
-    // Check if punk was already sold
-    console.log('🔍 Checking if punk was already sold...')
-    const saleCheck = await isPunkSold(punk.punkId, myPubkey)
-
-    if (saleCheck.sold) {
-      const buyerShort = saleCheck.buyerPubkey
-        ? `${saleCheck.buyerPubkey.slice(0, 8)}...${saleCheck.buyerPubkey.slice(-4)}`
-        : 'unknown buyer'
-
-      alert(
-        `❌ Cannot delist: This punk was already sold!\n\n` +
-        `${punk.metadata.name} was purchased by ${buyerShort}.\n\n` +
-        `Click the Refresh button to update your gallery.`
-      )
-      console.log('❌ Punk already sold, cannot delist')
-
-      // Refresh gallery to sync with Nostr
-      await refreshGallery()
-      return
-    }
-
-    const confirmed = confirm(`Remove ${punk.metadata.name} from marketplace?`)
-    if (!confirmed) return
-
-    console.log('🗑️ Delisting punk from marketplace...')
-
-    // If punk is in escrow, cancel escrow listing first to return collateral
-    if (punk.inEscrow) {
-      console.log('📦 Punk is in escrow, cancelling escrow listing...')
-      try {
-        const { cancelEscrowListing } = await import('./utils/escrowApi')
-        const arkAddress = wallet.arkadeAddress || ''
-
-        await cancelEscrowListing({
-          punkId: punk.punkId,
-          sellerPubkey: myPubkey,
-          sellerArkAddress: arkAddress
-        })
-        console.log('✅ Escrow cancelled, collateral returned')
-      } catch (escrowError: any) {
-        console.error('❌ Failed to cancel escrow:', escrowError)
-        alert(
-          `⚠️ Failed to return collateral from escrow:\n\n${escrowError.message}\n\n` +
-          `The punk will be delisted from Nostr, but you may need to contact support to retrieve your collateral.`
-        )
-        // Continue with delist anyway
-      }
-    }
-
-    // Publish delist event to Nostr
-    const success = await delistPunk(punk.punkId, privateKeyHex)
-
-    if (success) {
-      alert(`✅ ${punk.metadata.name} removed from marketplace!`)
-      console.log('✅ Punk successfully delisted')
-
-      // Update local state
-      listedPunkIds.value.delete(punk.punkId)
-
-      // Clear escrow flag if was in escrow
-      if (punk.inEscrow) {
-        const punkIndex = allPunks.value.findIndex(p => p.punkId === punk.punkId)
-        if (punkIndex !== -1) {
-          allPunks.value[punkIndex].inEscrow = false
-          allPunks.value[punkIndex].listingPrice = 0n
-          localStorage.setItem('arkade_punks', JSON.stringify(allPunks.value, (key, value) =>
-            typeof value === 'bigint' ? value.toString() : value
-          ))
-          console.log(`✅ Cleared escrow flag for punk ${punk.punkId.slice(0, 8)}...`)
-        }
-      }
-    } else {
-      alert('❌ Failed to delist punk. Check console for details.')
-    }
+    // Refresh gallery
+    await loadPunksSmartly()
   } catch (error: any) {
-    console.error('Failed to delist punk:', error)
+    console.error('❌ Failed to cancel escrow:', error)
     alert(`Failed to delist punk: ${error?.message || error}`)
   }
 }
 
-// Transfer a punk directly to another wallet
-async function transferPunk(punk: PunkState) {
-  const wallet = walletConnectRef.value?.getWallet?.()
-
-  if (!wallet) {
-    alert('Please connect your wallet first!')
-    return
-  }
-
-  // Check if punk is listed
-  if (listedPunkIds.value.has(punk.punkId)) {
-    alert('Please delist this punk from the marketplace before transferring it.')
-    return
-  }
-
-  const recipientAddress = prompt('Enter recipient Arkade address (ark1...):', '')
-  if (!recipientAddress) return
-
-  // Validate address format (basic check)
-  if (!recipientAddress.startsWith('ark1')) {
-    alert('Invalid Arkade address. Must start with ark1...')
-    return
-  }
-
-  // Get recipient Nostr pubkey (accept both npub and hex formats)
-  const recipientInput = prompt('Enter recipient Nostr public key (npub1... or hex):', '')
-  if (!recipientInput) return
-
-  // Parse and validate pubkey (accept both npub and hex)
-  let recipientPubkey: string
-  try {
-    if (recipientInput.startsWith('npub1')) {
-      // Decode npub to hex
-      const decoded = nip19.decode(recipientInput)
-      if (decoded.type !== 'npub') {
-        throw new Error('Invalid npub format')
-      }
-      recipientPubkey = decoded.data
-    } else if (/^[0-9a-fA-F]{64}$/.test(recipientInput)) {
-      // Already in hex format
-      recipientPubkey = recipientInput
-    } else {
-      alert('Invalid Nostr public key. Must be npub1... or 64 hex characters.')
-      return
-    }
-  } catch (error) {
-    alert('Invalid Nostr public key format.')
-    return
-  }
-
-  const confirmed = confirm(
-    `Transfer ${punk.metadata.name}?\n\n` +
-    `To: ${recipientAddress.slice(0, 20)}...\n` +
-    `Recipient Nostr: ${recipientInput.startsWith('npub') ? recipientInput.slice(0, 12) : recipientPubkey.slice(0, 8)}...${recipientInput.startsWith('npub') ? recipientInput.slice(-4) : recipientPubkey.slice(-4)}\n\n` +
-    `This action cannot be undone!`
-  )
-
-  if (!confirmed) return
-
-  try {
-    console.log('📤 Transferring punk...')
-
-    // Get private key from localStorage
-    const privateKeyHex = localStorage.getItem('arkade_wallet_private_key')
-    if (!privateKeyHex) {
-      throw new Error('Private key not found')
-    }
-
-    const myPubkey = getPublicKey(hex.decode(privateKeyHex))
-
-    // Check balance for minimal transfer (punk has no real value, just 1 sat symbolic transfer)
-    const balance = await wallet.getBalance()
-    if (balance.available < 1000) {
-      throw new Error('Insufficient balance for transfer (need at least 1000 sats for fees)')
-    }
-
-    // Send symbolic 1 sat transfer to recipient
-    const txid = await wallet.send(recipientAddress, BigInt(1))
-
-    // Publish transfer event to Nostr
-    await publishPunkTransfer(punk.punkId, myPubkey, recipientPubkey, txid, privateKeyHex)
-
-    // Remove punk from local storage
-    const punksJson = localStorage.getItem('arkade_punks')
-    if (punksJson) {
-      const punks = JSON.parse(punksJson)
-      const updatedPunks = punks.filter((p: any) => p.punkId !== punk.punkId)
-      localStorage.setItem('arkade_punks', JSON.stringify(updatedPunks, (key, value) =>
-        typeof value === 'bigint' ? value.toString() : value
-      ))
-    }
-
-    // Reload gallery
-    await loadPunksFromLocalStorage()
-
-    alert(
-      `✅ Transfer successful!\n\n` +
-      `${punk.metadata.name} has been transferred to ${recipientAddress.slice(0, 20)}...\n` +
-      `Transaction ID: ${txid.slice(0, 16)}...`
-    )
-
-    // Close punk details
-    selectedPunk.value = null
-
-  } catch (error: any) {
-    console.error('❌ Failed to transfer punk:', error)
-    alert(`Failed to transfer punk: ${error?.message || error}`)
-  }
-}
 
 // List a punk for sale on the marketplace
 async function listPunk(punk: PunkState) {
@@ -896,72 +897,49 @@ async function listPunk(punk: PunkState) {
       console.log('✅ Escrow listing created')
       console.log('   Escrow address:', escrowAddress)
 
-      // Send punk VTXO to escrow wallet
+      // Check wallet balance before sending
+      const balance = await wallet.getBalance()
+      const DEPOSIT_AMOUNT = 10000n
+
+      if (balance.total < DEPOSIT_AMOUNT) {
+        alert(
+          `❌ Insufficient Balance\n\n` +
+          `You need at least ${Number(DEPOSIT_AMOUNT).toLocaleString()} sats to list a punk in escrow.\n\n` +
+          `Your balance: ${balance.total.toLocaleString()} sats\n` +
+          `Missing: ${(DEPOSIT_AMOUNT - balance.total).toLocaleString()} sats\n\n` +
+          `💡 Receive more sats via Lightning or on-chain to list this punk.`
+        )
+        return
+      }
+
+      // Confirm sending deposit to escrow
       const transferConfirm = confirm(
         `🛡️ Escrow Listing Created!\n\n` +
-        `Now send ${punk.metadata.name} to the escrow wallet.\n\n` +
+        `Now send ${punk.metadata.name} deposit to the escrow wallet.\n\n` +
         `This will:\n` +
-        `• Transfer your punk VTXO (~10,100 sats) to escrow\n` +
+        `• Send ${Number(DEPOSIT_AMOUNT).toLocaleString()} sats to escrow as collateral\n` +
         `• Your punk will show as "🛡️ In Escrow" in your gallery (grayed out)\n` +
         `• Once a buyer pays, the escrow will automatically:\n` +
         `  - Transfer the punk to the buyer\n` +
-        `  - Send ${price.toLocaleString()} sats to you\n\n` +
-        `Ready to send punk to escrow?`
+        `  - Send ${price.toLocaleString()} sats to you\n` +
+        `  - Return your ${Number(DEPOSIT_AMOUNT).toLocaleString()} sat deposit\n\n` +
+        `Ready to send deposit to escrow?`
       )
 
       if (!transferConfirm) {
         alert(
-          `⚠️ Listing created but punk not sent to escrow.\n\n` +
-          `The listing won't be active until you send the punk to escrow.`
+          `⚠️ Listing created but deposit not sent to escrow.\n\n` +
+          `The listing won't be active until you send the deposit to escrow.`
         )
         return
       }
 
-      // Find ANY available punk-sized VTXO to send to escrow
-      // NOTE: Punks are tracked by Nostr, not by specific VTXO
-      // VTXOs are just 10k sat collateral - they're fungible
-      console.log('📋 Finding a punk-sized VTXO to send to escrow...')
-      console.log('   (Punks are tracked by Nostr, VTXOs are fungible collateral)')
-
-      const allVtxos = await wallet.getVtxos()
-      console.log(`   Available VTXOs: ${allVtxos.length}`)
-
-      // Debug: Log first VTXO structure to verify
-      if (allVtxos.length > 0) {
-        console.log('   🔍 First VTXO structure:', JSON.stringify(allVtxos[0], null, 2))
-      }
-
-      // Find any punk-sized VTXO (between 9,900 and 10,200 sats)
-      // Note: VTXOs from wallet.getVtxos() have structure: { vtxo: { amount: string, ... }, ... }
-      const punkSizedVtxos = allVtxos.filter(v => {
-        const amount = Number(v.vtxo.amount)
-        return amount >= 9900 && amount <= 10200
-      })
-      console.log(`   Found ${punkSizedVtxos.length} punk-sized VTXO(s)`)
-
-      if (punkSizedVtxos.length === 0) {
-        console.error('❌ No punk-sized VTXOs found!')
-        alert(
-          `❌ Error: No punk collateral found in your wallet.\n\n` +
-          `To list a punk in escrow, you need at least one VTXO of ~10,000 sats.\n\n` +
-          `Available VTXOs: ${allVtxos.length}\n` +
-          `Try refreshing your wallet or minting a punk first.`
-        )
-        return
-      }
-
-      // Use the first available punk-sized VTXO
-      const punkVtxo = punkSizedVtxos[0]
-      const vtxoOutpoint = `${punkVtxo.vtxo.outpoint.txid}:${punkVtxo.vtxo.outpoint.vout}`
-      const amount = Number(punkVtxo.vtxo.amount)
-      console.log(`   ✅ Using VTXO: ${vtxoOutpoint} (${amount} sats)`)
-
-      // Send punk collateral to escrow address
-      console.log(`📤 Sending ${amount} sats to escrow: ${escrowAddress}`)
+      // Send deposit to escrow address
+      console.log(`📤 Sending ${Number(DEPOSIT_AMOUNT).toLocaleString()} sats deposit to escrow: ${escrowAddress}`)
 
       try {
-        const txid = await wallet.send(escrowAddress, BigInt(amount))
-        console.log(`✅ Collateral sent to escrow! Txid: ${txid}`)
+        const txid = await wallet.send(escrowAddress, DEPOSIT_AMOUNT)
+        console.log(`✅ Deposit sent to escrow! Txid: ${txid}`)
 
         // The escrow will receive the VTXO at txid:0 (recipient gets vout 0)
         const escrowVtxoOutpoint = `${txid}:0`
@@ -976,16 +954,16 @@ async function listPunk(punk: PunkState) {
         alert(
           `✅ Success!\n\n` +
           `${punk.metadata.name} has been listed in escrow.\n\n` +
-          `Collateral sent: ${amount.toLocaleString()} sats\n` +
+          `Deposit sent: ${Number(DEPOSIT_AMOUNT).toLocaleString()} sats\n` +
           `Transaction ID: ${txid}\n\n` +
           `Your listing is now active in the marketplace!\n` +
           `The punk will show as "🛡️ In Escrow" (grayed out) in your gallery.\n\n` +
-          `When a buyer purchases it, you'll receive ${price.toLocaleString()} sats automatically.`
+          `When a buyer purchases it, you'll receive ${price.toLocaleString()} sats + your ${Number(DEPOSIT_AMOUNT).toLocaleString()} sat deposit back.`
         )
       } catch (sendError: any) {
-        console.error('❌ Failed to send collateral to escrow:', sendError)
+        console.error('❌ Failed to send deposit to escrow:', sendError)
         alert(
-          `⚠️ Listing created but failed to send collateral to escrow:\n\n` +
+          `⚠️ Listing created but failed to send deposit to escrow:\n\n` +
           `${sendError?.message || sendError}\n\n` +
           `Please try listing again.`
         )
@@ -993,33 +971,11 @@ async function listPunk(punk: PunkState) {
       }
     }
 
-    // Publish listing to Nostr
-    const success = await listPunkForSale(
-      punk.punkId,
-      BigInt(price),
-      compressedHex,
-      privateKeyHex,
-      arkAddress,
-      saleMode,
-      escrowAddress
-    )
+    // Refresh gallery to update punk state
+    console.log('🔄 Refreshing gallery to sync punk state...')
+    await loadPunksSmartly()
+    console.log('✅ Gallery refreshed')
 
-    if (success) {
-      alert(`✅ Punk listed for ${price.toLocaleString()} sats!\n\nView it in the Marketplace tab.`)
-      console.log('✅ Punk successfully listed on marketplace')
-
-      // Update local state
-      listedPunkIds.value.add(punk.punkId)
-
-      // If escrow mode, refresh gallery to sync escrow state from blob
-      if (saleMode === 'escrow') {
-        console.log('🔄 Refreshing gallery to sync escrow state from blob...')
-        await refreshGallery()
-        console.log('✅ Gallery refreshed - punk should now show as in escrow')
-      }
-    } else {
-      alert('❌ Failed to list punk. Check console for details.')
-    }
   } catch (error: any) {
     console.error('Failed to list punk:', error)
     alert(`Failed to list punk: ${error?.message || error}`)
@@ -1040,19 +996,10 @@ async function loadEscrowPubkey() {
 }
 
 onMounted(async () => {
-  // Use loadPunksFromLocalStorage() to avoid filtering sold punks
-  // If user did a Nostr sync before, the data is already correct
-  await loadPunksFromLocalStorage()
+  // Load punks (smart: checks registration and migrates if needed)
+  await loadPunksSmartly()
   updateWalletAddress()
-  await loadOfficialPunks()
-  await loadMarketplaceListings()
   await loadEscrowPubkey()
-
-  // Auto-submit local punks that aren't on Nostr to whitelist
-  // This runs in background and doesn't block the UI
-  autoSubmitLocalPunks().catch(err => {
-    console.warn('Auto-whitelist submission failed:', err)
-  })
 
   // Reload punks when switching wallets
   const walletCheckInterval = setInterval(() => {
@@ -1062,27 +1009,17 @@ onMounted(async () => {
     }
   }, 1000)
 
-  // Auto-refresh marketplace every 30 seconds (only when tab is visible)
-  const marketplaceRefreshInterval = setInterval(async () => {
-    if (document.visibilityState === 'visible' && currentView.value === 'marketplace') {
-      console.log('🔄 Auto-refreshing marketplace...')
-      await loadMarketplaceListings()
-    }
-  }, 30000)
-
   // Auto-refresh punks every 60 seconds (only when tab is visible)
   const punksRefreshInterval = setInterval(async () => {
     if (document.visibilityState === 'visible' && currentView.value === 'gallery') {
       console.log('🔄 Auto-refreshing punks...')
-      await loadPunksFromLocalStorage()
-      await loadOfficialPunks()
+      await loadPunksSmartly()
     }
   }, 60000)
 
   // Cleanup intervals on unmount
   onBeforeUnmount(() => {
     clearInterval(walletCheckInterval)
-    clearInterval(marketplaceRefreshInterval)
     clearInterval(punksRefreshInterval)
   })
 })

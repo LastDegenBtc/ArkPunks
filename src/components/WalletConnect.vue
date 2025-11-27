@@ -211,20 +211,20 @@
                   <em>✅ Your preconfirmed VTXOs are fully spendable!</em>
                 </span>
               </span>
-              <span v-else-if="balance.recoverable > 0n">
-                🔄 You have <strong>{{ balance.recoverable }}</strong> sats in recoverable VTXOs.<br>
-                These can be recovered using the button below.
+              <span v-else-if="actualLockedBalance > 0n">
+                ♻️ You have <strong>{{ actualLockedBalance }}</strong> sats in locked VTXOs.<br>
+                These can be renewed using the button below to prevent expiration.
               </span>
               <span v-else>
                 Your VTXOs look normal. Try refreshing your balance.
               </span>
             </p>
             <button
-              v-if="balance.recoverable > 0n"
-              @click="recoverExpiredVtxos"
-              class="btn-recover"
-              :disabled="recovering">
-              {{ recovering ? 'Recovering...' : '🔄 Recover Swept VTXOs' }}
+              v-if="actualLockedBalance > 0n"
+              @click="renewVtxos"
+              class="btn-renew"
+              :disabled="renewing">
+              {{ renewing ? 'Renewing...' : '♻️ Renew VTXOs' }}
             </button>
           </div>
         </div>
@@ -588,7 +588,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick, inject } from 'vue'
 import {
   generateIdentity,
   saveIdentity,
@@ -603,7 +603,7 @@ import type { VtxoInput } from '@/types/punk'
 import { getActiveConfig, getNetworkParams } from '@/config/arkade'
 import { hex } from '@scure/base'
 import QRCode from 'qrcode'
-import { generatePunkImage } from '@/utils/generator'
+import { generatePunkImage, generatePunkMetadata } from '@/utils/generator'
 import { getPublicKey, nip19 } from 'nostr-tools'
 import { queryAllPunkMints, queryPunksByPubkey, queryPunksByAddress } from '@/utils/nostrDiagnostics'
 import { prepareL1Exit, getExitStatusMessage, type PunkExitInfo } from '@/utils/arkadeExit'
@@ -614,6 +614,10 @@ import {
   estimateSwapFee,
   decodeLightningInvoice
 } from '@/utils/lightningSwaps'
+import { handleWalletImport } from '@/services/walletRegistration'
+
+// API URL - Use local server for development, or window.location.origin for production
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 const config = getActiveConfig()
 const params = getNetworkParams()
@@ -653,6 +657,7 @@ const rawVtxos = ref<any[]>([]) // Raw VTXOs from SDK for display
 const punkBalanceTrigger = ref(0) // Reactive trigger to force punkLockedBalance recalculation
 const syncing = ref(false) // Reserve sync in progress
 const recovering = ref(false) // VTXO recovery in progress
+const renewing = ref(false) // VTXO renewal in progress
 const showTroubleshooting = ref(false) // Show troubleshooting section
 const showLightning = ref(false) // Show Lightning section
 const showVtxoInfo = ref(false) // Show VTXO information section
@@ -685,6 +690,9 @@ const lightningSendResult = ref<any>(null)
 const lightningSendError = ref('')
 
 let wallet: ArkadeWalletInterface | null = null
+
+// Inject reloadPunks function from parent (App.vue)
+const reloadPunks = inject<(() => Promise<void>) | undefined>('reloadPunks')
 
 const minVtxoValue = params.minVtxoValue
 
@@ -1026,29 +1034,25 @@ async function handleFileImport(event: Event) {
     const identity = { privateKey, publicKey }
     saveIdentity(identity)
 
+    // Get wallet address from imported data
+    const walletAddress = walletData.address || walletData.wallet?.address
+    console.log('📍 Wallet address from imported file:', walletAddress)
+
     // Restore punks to localStorage
     if (walletData.punks && Array.isArray(walletData.punks)) {
       console.log(`📦 Restoring ${walletData.punks.length} punk(s)...`)
-
-      // Reconstruct full metadata structure with regenerated images
+      console.log(`   Setting owner to: ${walletAddress}`)
       const punksToSave = walletData.punks.map((punk: any) => {
-        const type = punk.type
-        const attributes = punk.attributes || []
-        const background = punk.background
-
-        // Regenerate image URL from traits
-        const imageUrl = generatePunkImage(type, attributes, background)
+        // Generate complete metadata deterministically from punkId
+        const metadata = generatePunkMetadata(punk.punkId)
 
         return {
           punkId: punk.punkId,
-          name: punk.name,
-          description: punk.description,
-          imageUrl, // Regenerated image
-          traits: {
-            type,
-            attributes,
-            background
-          },
+          owner: walletAddress, // Set owner to wallet address
+          name: metadata.name,
+          description: metadata.description,
+          imageUrl: metadata.imageUrl,
+          traits: metadata.traits,
           mintDate: punk.mintDate,
           vtxoOutpoint: punk.vtxoOutpoint
         }
@@ -1058,8 +1062,19 @@ async function handleFileImport(event: Event) {
         typeof value === 'bigint' ? value.toString() : value
       ))
       console.log('✅ Punks restored to localStorage with regenerated images')
+
+      // Register punks with server v2 (user-centric ownership)
+      try {
+        console.log('📝 Registering punks with server...')
+        await handleWalletImport({ address: walletAddress, punks: walletData.punks })
+        console.log('✅ Punks registered with server')
+      } catch (error) {
+        console.warn('⚠️ Failed to register punks with server:', error)
+        // Non-blocking: continue with wallet import even if registration fails
+      }
     }
 
+    // Create wallet instance
     wallet = await createArkadeWallet(identity)
 
     // Auto-renew expiring VTXOs IMMEDIATELY after wallet creation
@@ -1700,15 +1715,79 @@ async function recoverExpiredVtxos() {
   }
 }
 
-function exportWallet() {
+async function renewVtxos() {
+  if (!wallet) {
+    alert('Please connect your wallet first')
+    return
+  }
+
+  renewing.value = true
+
+  try {
+    console.log('♻️ Renewing VTXOs to prevent expiration...')
+
+    // Import VtxoManager from SDK
+    const { VtxoManager } = await import('@arkade-os/sdk')
+
+    // Create VtxoManager instance
+    const vtxoManager = new VtxoManager(wallet.sdkWallet, {
+      enabled: true,
+      thresholdPercentage: 10
+    })
+
+    // Get current balance before renewal
+    const balanceBefore = await wallet.sdkWallet.getBalance()
+    console.log(`   Current balance: ${balanceBefore.total} sats`)
+    console.log(`   Locked: ${balanceBefore.total - balanceBefore.available} sats`)
+
+    // Renew VTXOs
+    const txid = await vtxoManager.renewVtxos()
+
+    console.log('✅ Renewal txid:', txid)
+
+    // Refresh wallet info
+    await refreshBalance()
+
+    // Get new balance
+    const balanceAfter = await wallet.sdkWallet.getBalance()
+    const renewed = (balanceBefore.total - balanceBefore.available) - (balanceAfter.total - balanceAfter.available)
+
+    alert(
+      `✅ VTXOs Renewed Successfully!\n\n` +
+      `Renewed ${renewed} sats worth of VTXOs\n` +
+      `Transaction: ${txid}\n\n` +
+      `Your VTXOs have been refreshed and won't expire soon.`
+    )
+  } catch (error: any) {
+    console.error('❌ Failed to renew VTXOs:', error)
+    alert(
+      `Failed to renew VTXOs:\n\n` +
+      `${error.message}\n\n` +
+      `Please try again later or contact support.`
+    )
+  } finally {
+    renewing.value = false
+  }
+}
+
+async function exportWallet() {
   try {
     // Get wallet keys from localStorage
     const privateKey = localStorage.getItem('arkade_wallet_private_key')
     const publicKey = localStorage.getItem('arkade_wallet_public_key')
 
-    // Get punks from localStorage
-    const punksJson = localStorage.getItem('arkade_punks')
-    const punks = punksJson ? JSON.parse(punksJson) : []
+    // Get punks from database (not localStorage)
+    let punks: any[] = []
+    try {
+      const response = await fetch(`${API_URL}/api/punks?address=${arkadeAddress.value}`)
+      if (response.ok) {
+        const data = await response.json()
+        punks = data.punks || []
+        console.log(`✅ Loaded ${punks.length} punks from database for export`)
+      }
+    } catch (err) {
+      console.warn('Failed to fetch punks from database, exporting wallet without punks:', err)
+    }
 
     // Get current config
     const network = config.network
@@ -1737,7 +1816,8 @@ function exportWallet() {
         background: punk.traits?.background,
         description: punk.description,
         mintDate: punk.mintDate || new Date().toISOString(),
-        vtxoOutpoint: punk.vtxoOutpoint
+        vtxoOutpoint: punk.vtxoOutpoint,
+        compressedMetadata: punk.compressedMetadata
       })),
       totalPunksMinted: punks.length,
       notes: [
@@ -2031,6 +2111,12 @@ onMounted(async () => {
       // Now update wallet info (calls getBalance, getVtxos, etc.)
       await updateWalletInfo()
       connected.value = true
+
+      // Reload punks from database after wallet connects
+      if (reloadPunks) {
+        console.log('💡 Wallet connected, loading punks from database...')
+        await reloadPunks()
+      }
     } catch (error) {
       console.error('Failed to restore wallet:', error)
       clearIdentity()
