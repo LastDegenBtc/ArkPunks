@@ -8,7 +8,7 @@
  */
 
 import dotenv from 'dotenv'
-dotenv.config()
+dotenv.config({ path: '../.env' })
 
 import express from 'express'
 import cors from 'cors'
@@ -66,6 +66,53 @@ if (!tableExists) {
 }
 
 console.log('✅ Database ready\n')
+
+// Admin password protection
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin_secret_2024'
+
+// ============================================================
+// AUDIT LOGGING
+// ============================================================
+
+const auditLog = db.prepare(`
+  INSERT INTO audit_log (timestamp, action, punk_id, seller_address, buyer_address, amount_sats, txid, status, error_message, details)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`)
+
+/**
+ * Log an audit event for tracking and debugging
+ */
+function logAudit(action, data = {}) {
+  const timestamp = Date.now()
+  const {
+    punkId = null,
+    sellerAddress = null,
+    buyerAddress = null,
+    amount = null,
+    txid = null,
+    status = 'SUCCESS',
+    error = null,
+    details = null
+  } = data
+
+  try {
+    auditLog.run(
+      timestamp,
+      action,
+      punkId,
+      sellerAddress,
+      buyerAddress,
+      amount,
+      txid,
+      status,
+      error,
+      details ? JSON.stringify(details) : null
+    )
+    console.log(`📋 AUDIT [${action}] ${status} - punk:${punkId?.slice(0,8) || 'N/A'} seller:${sellerAddress?.slice(0,20) || 'N/A'} buyer:${buyerAddress?.slice(0,20) || 'N/A'} amount:${amount || 0}`)
+  } catch (err) {
+    console.error('❌ Failed to write audit log:', err)
+  }
+}
 
 // ============================================================
 // PUNK SIGNING FUNCTION
@@ -656,6 +703,15 @@ app.post('/api/escrow/list', (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(punkId, sellerArkAddress, sellerPubkey, price, 'pending', ESCROW_ADDRESS, now, compressedMetadata || null)
 
+    // AUDIT: List created
+    logAudit('LIST_CREATED', {
+      punkId,
+      sellerAddress: sellerArkAddress,
+      amount: price,
+      status: 'SUCCESS',
+      details: { escrowAddress: ESCROW_ADDRESS }
+    })
+
     console.log(`✅ Listing created - waiting for punk deposit`)
 
     return res.status(200).json({
@@ -753,6 +809,15 @@ app.post('/api/escrow/update-outpoint', (req, res) => {
       SET status = 'deposited', deposited_at = ?, punk_vtxo_outpoint = ?
       WHERE punk_id = ?
     `).run(now, punkVtxoOutpoint, punkId)
+
+    // AUDIT: Deposit confirmed
+    logAudit('DEPOSIT_CONFIRMED', {
+      punkId,
+      sellerAddress: listing.seller_address,
+      amount: listing.price_sats,
+      status: 'SUCCESS',
+      details: { vtxoOutpoint: punkVtxoOutpoint }
+    })
 
     console.log(`✅ Punk deposited to escrow: ${punkId.slice(0, 8)}...`)
     console.log(`   VTXO outpoint: ${punkVtxoOutpoint}`)
@@ -923,6 +988,17 @@ app.post('/api/escrow/execute', async (req, res) => {
       console.log(`✅ Deposit returned to seller: ${depositReturnTxid}`)
     } catch (error) {
       console.error('❌ Failed to send payment to seller:', error)
+
+      // AUDIT: Payment failed
+      logAudit('PAYMENT_FAILED', {
+        punkId,
+        sellerAddress: listing.seller_address,
+        buyerAddress: buyerArkAddress,
+        amount: listing.price_sats,
+        status: 'FAILED',
+        error: error.message
+      })
+
       // Payment failed but punk is already transferred
       // Mark listing with error status so we can retry payment manually
       db.prepare(`
@@ -967,6 +1043,17 @@ app.post('/api/escrow/execute', async (req, res) => {
     })
 
     finalizeTransaction()
+
+    // AUDIT: Sale completed successfully
+    logAudit('SALE_COMPLETED', {
+      punkId,
+      sellerAddress: listing.seller_address,
+      buyerAddress: buyerArkAddress,
+      amount: listing.price_sats,
+      txid: paymentTxid,
+      status: 'SUCCESS',
+      details: { depositReturnTxid, depositAmount: 10000 }
+    })
 
     console.log(`✅ Purchase completed for punk ${punkId.slice(0, 8)}...`)
     console.log(`   Seller: ${listing.seller_address.slice(0, 20)}...`)
@@ -1026,6 +1113,16 @@ app.post('/api/escrow/cancel', async (req, res) => {
         console.log(`✅ Punk returned via txid: ${returnTxid}`)
       } catch (returnError) {
         console.error(`❌ Failed to return punk:`, returnError)
+
+        // AUDIT: Refund failed
+        logAudit('REFUND_FAILED', {
+          punkId,
+          sellerAddress,
+          amount: 10000,
+          status: 'FAILED',
+          error: returnError.message
+        })
+
         // Still mark as cancelled, but note the return failed
         return res.status(500).json({
           error: 'Failed to return punk from escrow',
@@ -1042,6 +1139,16 @@ app.post('/api/escrow/cancel', async (req, res) => {
       SET status = 'cancelled', cancelled_at = ?
       WHERE punk_id = ?
     `).run(now, punkId)
+
+    // AUDIT: Listing cancelled
+    logAudit('LISTING_CANCELLED', {
+      punkId,
+      sellerAddress,
+      amount: listing.price_sats,
+      txid: returnTxid,
+      status: 'SUCCESS',
+      details: { wasDeposited: listing.status === 'deposited', refundAmount: returnTxid ? 10000 : 0 }
+    })
 
     console.log(`🔴 Listing cancelled: ${punkId.slice(0, 8)}...`)
 
@@ -1094,6 +1201,323 @@ app.get('/health', (req, res) => {
     })
   } catch (error) {
     return res.status(500).json({ status: 'error', error: error.message })
+  }
+})
+
+// ============================================================
+// ADMIN - AUDIT LOG
+// ============================================================
+
+app.get('/api/admin/audit', (req, res) => {
+  const { password, limit = 100, action, punkId } = req.query
+
+  // Verify admin password (separate from support password)
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' })
+  }
+
+  try {
+    let query = 'SELECT * FROM audit_log'
+    const params = []
+    const conditions = []
+
+    if (action) {
+      conditions.push('action = ?')
+      params.push(action)
+    }
+
+    if (punkId) {
+      conditions.push('punk_id = ?')
+      params.push(punkId)
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ')
+    }
+
+    query += ' ORDER BY timestamp DESC LIMIT ?'
+    params.push(parseInt(limit))
+
+    const logs = db.prepare(query).all(...params)
+
+    // Parse details JSON
+    const formattedLogs = logs.map(log => ({
+      ...log,
+      details: log.details ? JSON.parse(log.details) : null,
+      timestampFormatted: new Date(log.timestamp).toISOString()
+    }))
+
+    return res.json({
+      success: true,
+      count: formattedLogs.length,
+      logs: formattedLogs
+    })
+  } catch (error) {
+    console.error('Error fetching audit log:', error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// ============================================================
+// MARKETPLACE SALES & STATS
+// ============================================================
+
+app.get('/api/marketplace/sales', (req, res) => {
+  try {
+    // Get all completed sales with punk metadata
+    const sales = db.prepare(`
+      SELECT
+        s.punk_id,
+        s.price_sats,
+        s.seller_address,
+        s.buyer_address,
+        s.sold_at,
+        s.payment_txid,
+        p.punk_metadata_compressed
+      FROM sales s
+      LEFT JOIN punks p ON s.punk_id = p.punk_id
+      ORDER BY s.sold_at DESC
+    `).all()
+
+    // Get current floor price from active listings
+    const floorListing = db.prepare(`
+      SELECT MIN(price_sats) as floor_price
+      FROM listings
+      WHERE status = 'deposited'
+    `).get()
+
+    // Calculate stats from sales history
+    let highestSale = 0
+    let totalVolume = 0
+    let totalSales = sales.length
+
+    for (const sale of sales) {
+      if (sale.price_sats > highestSale) {
+        highestSale = sale.price_sats
+      }
+      totalVolume += sale.price_sats
+    }
+
+    const averagePrice = totalSales > 0 ? Math.floor(totalVolume / totalSales) : 0
+    const floorPrice = floorListing?.floor_price || 0
+
+    // Format sales for frontend
+    const formattedSales = sales.map(sale => ({
+      punkId: sale.punk_id,
+      price: sale.price_sats.toString(),
+      seller: sale.seller_address,
+      buyer: sale.buyer_address,
+      timestamp: sale.sold_at,
+      compressedMetadata: sale.punk_metadata_compressed || null
+    }))
+
+    return res.json({
+      success: true,
+      sales: formattedSales,
+      stats: {
+        floorPrice: floorPrice.toString(),
+        highestSale: highestSale.toString(),
+        totalVolume: totalVolume.toString(),
+        totalSales,
+        averagePrice: averagePrice.toString()
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching marketplace sales:', error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// ============================================================
+// SUPPORT - PUNK RECOVERY REQUESTS
+// ============================================================
+
+// Create support_requests table if not exists
+db.exec(`
+  CREATE TABLE IF NOT EXISTS support_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ark_address TEXT,
+    nostr_pubkey TEXT,
+    boarding_address TEXT,
+    punks_in_export INTEGER,
+    contact_handle TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    punks_found INTEGER DEFAULT 0,
+    admin_notes TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    resolved_at INTEGER
+  )
+`)
+
+// Public endpoint - submit recovery request (no password)
+app.post('/api/support/request', async (req, res) => {
+  const { arkAddress, nostrPubkey, boardingAddress, punksInExport, contactHandle } = req.body
+
+  if (!arkAddress && !nostrPubkey && !boardingAddress) {
+    return res.status(400).json({ success: false, error: 'Please provide at least one identifier' })
+  }
+
+  try {
+    // Search for punks (same logic as before, but store results)
+    let punksFound = 0
+
+    if (arkAddress) {
+      const punksOwned = db.prepare(`SELECT COUNT(*) as count FROM punks WHERE owner_address = ?`).get(arkAddress)
+      const salesAsSeller = db.prepare(`SELECT COUNT(*) as count FROM sales WHERE seller_address = ?`).get(arkAddress)
+      const salesAsBuyer = db.prepare(`SELECT COUNT(*) as count FROM sales WHERE buyer_address = ?`).get(arkAddress)
+      const listings = db.prepare(`SELECT COUNT(*) as count FROM listings WHERE seller_address = ?`).get(arkAddress)
+
+      punksFound = punksOwned.count + salesAsSeller.count + salesAsBuyer.count + listings.count
+    }
+
+    // Store the request
+    const result = db.prepare(`
+      INSERT INTO support_requests (ark_address, nostr_pubkey, boarding_address, punks_in_export, contact_handle, punks_found)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(arkAddress, nostrPubkey, boardingAddress, punksInExport, contactHandle, punksFound)
+
+    console.log(`📩 New support request #${result.lastInsertRowid} from ${arkAddress?.slice(0, 30) || 'unknown'}... (found ${punksFound} records)`)
+
+    return res.json({
+      success: true,
+      requestId: result.lastInsertRowid,
+      message: 'Request submitted successfully'
+    })
+
+  } catch (error) {
+    console.error('Support request error:', error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Admin endpoint - view support requests
+app.get('/api/admin/support-requests', (req, res) => {
+  const { password, status = 'all' } = req.query
+
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' })
+  }
+
+  try {
+    let query = 'SELECT * FROM support_requests'
+    const params = []
+
+    if (status !== 'all') {
+      query += ' WHERE status = ?'
+      params.push(status)
+    }
+
+    query += ' ORDER BY created_at DESC'
+
+    const requests = db.prepare(query).all(...params)
+
+    return res.json({
+      success: true,
+      count: requests.length,
+      requests
+    })
+
+  } catch (error) {
+    console.error('Admin support requests error:', error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Admin endpoint - lookup punk details for a request
+app.get('/api/admin/support-lookup', (req, res) => {
+  const { password, arkAddress } = req.query
+
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' })
+  }
+
+  if (!arkAddress) {
+    return res.status(400).json({ success: false, error: 'arkAddress required' })
+  }
+
+  try {
+    const results = {
+      sources: [],
+      totalPunksFound: 0,
+      punks: []
+    }
+
+    // 1. Search in punks table
+    const punksOwned = db.prepare(`
+      SELECT punk_id, owner_address, punk_metadata_compressed, created_at, server_signature
+      FROM punks WHERE owner_address = ?
+    `).all(arkAddress)
+
+    if (punksOwned.length > 0) {
+      results.sources.push({ source: 'database_owner', description: 'Punks currently owned', count: punksOwned.length })
+      punksOwned.forEach(p => {
+        results.punks.push({ punkId: p.punk_id, source: 'database_owner', isOfficial: !!p.server_signature })
+      })
+    }
+
+    // 2. Search in sales as seller
+    const salesAsSeller = db.prepare(`SELECT punk_id, price_sats, buyer_address, sold_at FROM sales WHERE seller_address = ?`).all(arkAddress)
+    if (salesAsSeller.length > 0) {
+      results.sources.push({ source: 'sales_seller', description: 'Punks sold', count: salesAsSeller.length })
+      salesAsSeller.forEach(s => {
+        results.punks.push({ punkId: s.punk_id, source: 'sales_seller', price: s.price_sats, soldAt: s.sold_at })
+      })
+    }
+
+    // 3. Search in sales as buyer
+    const salesAsBuyer = db.prepare(`SELECT punk_id, price_sats, seller_address, sold_at FROM sales WHERE buyer_address = ?`).all(arkAddress)
+    if (salesAsBuyer.length > 0) {
+      results.sources.push({ source: 'sales_buyer', description: 'Punks bought', count: salesAsBuyer.length })
+      salesAsBuyer.forEach(s => {
+        results.punks.push({ punkId: s.punk_id, source: 'sales_buyer', price: s.price_sats, boughtAt: s.sold_at })
+      })
+    }
+
+    // 4. Search in listings
+    const listings = db.prepare(`SELECT punk_id, price_sats, status, created_at FROM listings WHERE seller_address = ?`).all(arkAddress)
+    if (listings.length > 0) {
+      results.sources.push({ source: 'listings', description: 'Listings created', count: listings.length })
+      listings.forEach(l => {
+        results.punks.push({ punkId: l.punk_id, source: 'listings', status: l.status, price: l.price_sats })
+      })
+    }
+
+    const uniquePunkIds = [...new Set(results.punks.map(p => p.punkId))]
+    results.totalPunksFound = uniquePunkIds.length
+
+    return res.json({ success: true, ...results })
+
+  } catch (error) {
+    console.error('Admin support lookup error:', error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Admin endpoint - update request status
+app.post('/api/admin/support-requests/:id/update', (req, res) => {
+  const { password, status, adminNotes } = req.body
+  const { id } = req.params
+
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' })
+  }
+
+  try {
+    const resolvedAt = status === 'resolved' ? Date.now() : null
+
+    db.prepare(`
+      UPDATE support_requests
+      SET status = ?, admin_notes = ?, resolved_at = ?
+      WHERE id = ?
+    `).run(status, adminNotes, resolvedAt, id)
+
+    console.log(`📝 Support request #${id} updated to ${status}`)
+
+    return res.json({ success: true })
+
+  } catch (error) {
+    console.error('Update support request error:', error)
+    return res.status(500).json({ success: false, error: error.message })
   }
 })
 

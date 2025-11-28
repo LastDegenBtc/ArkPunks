@@ -23,6 +23,12 @@
           <button @click="currentView = 'faq'" :class="{ active: currentView === 'faq' }">
             FAQ
           </button>
+          <button @click="currentView = 'support'" :class="{ active: currentView === 'support' }" class="nav-support">
+            Support
+          </button>
+          <button @click="currentView = 'audit'" :class="{ active: currentView === 'audit' }" class="nav-admin">
+            Admin
+          </button>
         </nav>
       </div>
     </header>
@@ -82,6 +88,14 @@
         <div v-if="currentView === 'faq'" class="view">
           <FAQ />
         </div>
+
+        <div v-if="currentView === 'support'" class="view">
+          <Support />
+        </div>
+
+        <div v-if="currentView === 'audit'" class="view">
+          <AuditLog />
+        </div>
       </div>
     </main>
 
@@ -106,6 +120,8 @@ import Marketplace from './components/Marketplace.vue'
 import Stats from './components/Stats.vue'
 import WalletConnect from './components/WalletConnect.vue'
 import FAQ from './components/FAQ.vue'
+import Support from './components/Support.vue'
+import AuditLog from './components/AuditLog.vue'
 import { PunkState } from './types/punk'
 import { generatePunkMetadata } from './utils/generator'
 import type { ArkadeWalletInterface } from './utils/arkadeWallet'
@@ -281,8 +297,6 @@ async function migrateLocalStorageToDatabase(address: string): Promise<boolean> 
       }
     })
 
-    console.log(`🗜️  Compressed metadata for ${punksToRegister.length} punks`)
-
     // Get wallet's Bitcoin address to help resolve same-wallet conflicts
     const wallet = walletConnectRef.value?.getWallet?.()
     const bitcoinAddress = wallet?.address || null
@@ -374,8 +388,6 @@ async function loadPunksFromDatabase(address: string): Promise<PunkState[]> {
         console.error(`Failed to decompress punk ${dbPunk.punk_id.slice(0, 8)}:`, error)
       }
     }
-
-    console.log(`✅ Decompressed ${punks.length} punks`)
 
     // Sync escrow flags from server
     try {
@@ -872,14 +884,9 @@ async function listPunk(punk: PunkState) {
 
     // Compress punk metadata
     const compressed = compressPunkMetadata(punk.metadata)
-    console.log('   Compressed bytes:', compressed)
-
     const compressedHex = Array.from(compressed.data)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('')
-
-    console.log('   Compressed hex:', compressedHex)
-    console.log('   Hex length:', compressedHex.length)
 
     if (!compressedHex || compressedHex.length === 0) {
       throw new Error('Failed to compress punk metadata')
@@ -905,7 +912,6 @@ async function listPunk(punk: PunkState) {
       // Compress metadata for buyer recovery (optimization: no Nostr query needed later)
       const compressed = compressPunkMetadata(punk.metadata)
       const compressedMetadata = compressedToHex(compressed)
-      console.log(`   Compressed metadata: ${compressedMetadata.length} chars`)
 
       const escrowListing = await listPunkInEscrow({
         punkId: punk.punkId,

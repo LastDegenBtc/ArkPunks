@@ -74,3 +74,24 @@ CREATE TABLE IF NOT EXISTS legacy_data (
   vtxo_outpoint TEXT,
   imported_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
 );
+
+-- Audit log: Track all critical operations for security/debugging
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  action TEXT NOT NULL,                  -- 'LIST', 'DEPOSIT', 'BUY', 'CANCEL', 'PAYMENT', 'REFUND'
+  punk_id TEXT,
+  seller_address TEXT,
+  buyer_address TEXT,
+  amount_sats INTEGER,
+  txid TEXT,                             -- Ark transaction ID if applicable
+  status TEXT,                           -- 'SUCCESS', 'FAILED', 'PENDING'
+  error_message TEXT,                    -- Error details if failed
+  details TEXT                           -- JSON with extra info
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_punk ON audit_log(punk_id);
+CREATE INDEX IF NOT EXISTS idx_audit_seller ON audit_log(seller_address);
+CREATE INDEX IF NOT EXISTS idx_audit_buyer ON audit_log(buyer_address);

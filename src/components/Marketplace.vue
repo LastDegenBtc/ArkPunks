@@ -236,11 +236,11 @@ const totalPages = computed(() => {
 })
 
 const paginatedPunks = computed(() => {
-  // Sort by price (lowest first)
+  // Sort by price (lowest first) - use BigInt comparison
   const sorted = [...listedPunks.value].sort((a, b) => {
-    const priceA = Number(a.price)
-    const priceB = Number(b.price)
-    return priceA - priceB
+    if (a.listingPrice < b.listingPrice) return -1
+    if (a.listingPrice > b.listingPrice) return 1
+    return 0
   })
   const start = (currentPage.value - 1) * itemsPerPage
   const end = start + itemsPerPage
@@ -340,14 +340,11 @@ async function loadListings() {
       try {
         if (listing.compressedMetadata) {
           // Use compressed metadata from database
-          // Convert hex string to bytes first, then decompress
           const compressedBytes = hexToCompressed(listing.compressedMetadata)
           metadata = decompressPunkMetadata(compressedBytes, listing.punkId)
-          console.log(`✅ Decompressed metadata for punk #${listing.punkId.slice(0, 8)}`)
         } else {
           // Fallback: generate from punkId if no compressed metadata
           metadata = generatePunkMetadata(listing.punkId)
-          console.log(`⚠️  Generated metadata from punkId for #${listing.punkId.slice(0, 8)} (no compressed data)`)
         }
       } catch (error) {
         console.warn(`Failed to process metadata for punk ${listing.punkId}:`, error)

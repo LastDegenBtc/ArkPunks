@@ -18,7 +18,13 @@
       "Bash(node scripts/fetch-legacy-punks.js:*)",
       "Bash(node scripts/migrate-to-blob-registry.js:*)",
       "Bash(curl:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(pm2 logs:*)",
+      "Bash(nslookup:*)",
+      "Bash(dig:*)",
+      "Bash(cat:*)",
+      "Bash(jq \".punks[] | select(.owner_address | contains(\"\"gqfp6nz3ku25rfjql3dfsytz6fsswuvg6j7vgt07jlck5qeuwglz0y30m\"\")) | .punk_id\")",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []

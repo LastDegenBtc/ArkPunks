@@ -364,11 +364,9 @@ async function viewPunk(punkId: string) {
     }
 
     // Second fallback: Use compressed metadata from sales history (escrow)
-    console.log('⚠️ Punk not in local gallery, checking sales history...')
     const sale = allSales.value.find(s => s.punkId === punkId)
 
     if (sale && sale.compressedMetadata) {
-      console.log('✅ Found compressed metadata in sales history')
 
       // Convert compressed hex to Uint8Array
       const compressedData = new Uint8Array(

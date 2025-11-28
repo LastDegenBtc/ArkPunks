@@ -3,25 +3,24 @@
  * Handles punk VTXO returns from escrow
  */
 
-import dotenv from 'dotenv'
-dotenv.config()
-
 import { Wallet, SingleKey } from '@arkade-os/sdk'
 
-const ESCROW_PRIVATE_KEY = process.env.ESCROW_WALLET_PRIVATE_KEY || ''
 const ARK_URL = process.env.ARK_URL || 'https://arkade.computer'
 
 /**
  * Initialize the escrow wallet
  */
 async function initEscrowWallet() {
-  if (!ESCROW_PRIVATE_KEY) {
+  // Read key at runtime (not at import time)
+  const escrowPrivateKey = process.env.ESCROW_WALLET_PRIVATE_KEY || ''
+
+  if (!escrowPrivateKey) {
     throw new Error('ESCROW_WALLET_PRIVATE_KEY not configured')
   }
 
   try {
     // Create wallet identity from hex private key
-    const identity = SingleKey.fromHex(ESCROW_PRIVATE_KEY)
+    const identity = SingleKey.fromHex(escrowPrivateKey)
 
     // Create wallet using the correct async API
     const wallet = await Wallet.create({
