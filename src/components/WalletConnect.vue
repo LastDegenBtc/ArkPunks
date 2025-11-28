@@ -696,10 +696,11 @@ const reloadPunks = inject<(() => Promise<void>) | undefined>('reloadPunks')
 
 const minVtxoValue = params.minVtxoValue
 
-// Lightning feature flag (disabled in production by default)
+// Lightning feature flag (disabled - requires Node 22+ for boltz-swap)
 const lightningEnabled = computed(() => {
-  // Only enable if explicitly set in environment
-  return import.meta.env.VITE_ENABLE_LIGHTNING === 'true'
+  // Disabled until Node 22+ is available
+  return false
+  // return import.meta.env.VITE_ENABLE_LIGHTNING === 'true'
 })
 
 /**
