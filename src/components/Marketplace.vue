@@ -43,8 +43,8 @@
         <div v-for="punk in paginatedPunks" :key="punk.punkId" class="marketplace-card">
         <div class="punk-image">
           <img :src="punk.metadata.imageUrl" :alt="punk.metadata.name" />
-          <div v-if="punk.isOfficial" class="official-badge" title="Official ArkPunk - First 1000 on relay.damus.io">
-            ✓ OFFICIAL
+          <div v-if="punk.isOfficial" class="official-badge" title="Official ArkPunk">
+            ✓
           </div>
         </div>
 
@@ -236,9 +236,15 @@ const totalPages = computed(() => {
 })
 
 const paginatedPunks = computed(() => {
+  // Sort by price (lowest first)
+  const sorted = [...listedPunks.value].sort((a, b) => {
+    const priceA = Number(a.price)
+    const priceB = Number(b.price)
+    return priceA - priceB
+  })
   const start = (currentPage.value - 1) * itemsPerPage
   const end = start + itemsPerPage
-  return listedPunks.value.slice(start, end)
+  return sorted.slice(start, end)
 })
 
 const paginationText = computed(() => {
@@ -780,10 +786,14 @@ h2 {
   right: 8px;
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: #fff;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
   font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }

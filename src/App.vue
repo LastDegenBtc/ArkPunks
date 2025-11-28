@@ -612,6 +612,25 @@ async function loadPunksFromLocalStorage() {
         ))
       }
 
+      // Fetch server signatures from API to set isOfficial status
+      let signatureMap = new Map<string, boolean>()
+      try {
+        console.log('🔐 Fetching server signatures from API...')
+        const sigResponse = await fetch(`${API_URL}/api/punks`)
+        if (sigResponse.ok) {
+          const sigData = await sigResponse.json()
+          const dbPunks = sigData.punks || []
+          for (const p of dbPunks) {
+            if (p.server_signature) {
+              signatureMap.set(p.punk_id, true)
+            }
+          }
+          console.log(`   ✅ Found ${signatureMap.size} signed punks in database`)
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to fetch server signatures:', error)
+      }
+
       allPunks.value = uniquePunks.map((data: any) => {
         const punk = {
           punkId: data.punkId,
@@ -620,14 +639,18 @@ async function loadPunksFromLocalStorage() {
           metadata: data.metadata || data,
           listingPrice: 10000n,
           vtxoOutpoint: data.vtxoOutpoint || `${data.punkId}:0`,
-          inEscrow: data.inEscrow || false
+          inEscrow: data.inEscrow || false,
+          isOfficial: signatureMap.get(data.punkId) || false
         }
         if (data.inEscrow) {
           console.log(`📦 loadPunksFromLocalStorage: Loaded punk ${data.punkId.slice(0, 8)}... with inEscrow=${data.inEscrow}`)
         }
+        if (punk.isOfficial) {
+          console.log(`✅ Official punk: ${data.punkId.slice(0, 8)}...`)
+        }
         return punk
       })
-      console.log(`✅ loadPunksFromLocalStorage: Set allPunks to ${allPunks.value.length} punks`)
+      console.log(`✅ loadPunksFromLocalStorage: Set allPunks to ${allPunks.value.length} punks (${signatureMap.size} official)`)
     } else {
       console.log('   No punks found in localStorage')
     }
