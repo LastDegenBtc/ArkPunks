@@ -87,8 +87,12 @@ function signPunkId(punkId) {
       SERVER_PRIVATE_KEY.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
     )
 
-    // Create message to sign: sha256(punkId)
-    const messageHash = sha256(punkId)
+    // Create message to sign: sha256(punkId as bytes)
+    // Convert hex punkId to Uint8Array first
+    const punkIdBytes = new Uint8Array(
+      punkId.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
+    )
+    const messageHash = sha256(punkIdBytes)
 
     // Sign with schnorr (Nostr standard)
     const signature = schnorr.sign(messageHash, privKeyBytes)
@@ -359,6 +363,7 @@ app.get('/api/punks', (req, res) => {
         p.punk_id,
         p.owner_address,
         p.punk_metadata_compressed,
+        p.server_signature,
         p.minted_at,
         p.updated_at,
         l.source as legacy_source,
@@ -1051,6 +1056,26 @@ app.post('/api/escrow/cancel', async (req, res) => {
   } catch (error) {
     console.error('Error cancelling listing:', error)
     return res.status(500).json({ error: 'Database error' })
+  }
+})
+
+// ============================================================
+// WHITELIST - All punks in database are official
+// ============================================================
+
+app.get('/api/whitelist/list', (req, res) => {
+  try {
+    const punks = db.prepare('SELECT punk_id FROM punks').all()
+    const punkIds = punks.map(p => p.punk_id)
+
+    return res.json({
+      success: true,
+      punkIds,
+      count: punkIds.length
+    })
+  } catch (error) {
+    console.error('Error fetching whitelist:', error)
+    return res.status(500).json({ success: false, error: error.message })
   }
 })
 
