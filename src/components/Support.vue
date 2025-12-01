@@ -16,8 +16,8 @@
       <div class="search-card">
         <h3>Submit Recovery Request</h3>
         <p class="hint">
-          Enter your Ark address or paste your wallet export (without private key!).
-          We'll search our database and contact you if we find your punks.
+          <strong>Important:</strong> To find punks minted before the migration, we need your <strong>wallet export JSON</strong> (contains your publicKey).
+          Just the Ark address is not enough for legacy punks!
         </p>
 
         <div class="input-group">
@@ -30,13 +30,14 @@
         </div>
 
         <div class="input-group">
-          <label>Or paste wallet export JSON (without your private key!)</label>
+          <label>Paste wallet export JSON (REQUIRED for legacy punks - without private key!)</label>
           <textarea
             v-model="jsonExport"
-            placeholder='{"wallet": {"address": "ark1..."}, ...}'
+            placeholder='{"wallet": {"address": "ark1...", "publicKey": "..."}, ...}'
             rows="4"
             @input="parseJsonExport"
           ></textarea>
+          <small class="field-hint">Go to Settings → Export Wallet in the app, then remove the privateKey before pasting</small>
         </div>
 
         <div v-if="parsedInfo" class="parsed-info">
@@ -50,11 +51,20 @@
         </div>
 
         <div class="input-group">
+          <label>Nostr npub (optional - helps find legacy mints)</label>
+          <input
+            v-model="nostrNpub"
+            type="text"
+            placeholder="npub1..."
+          />
+        </div>
+
+        <div class="input-group">
           <label>Contact (X/Nostr handle - optional)</label>
           <input
             v-model="contactHandle"
             type="text"
-            placeholder="@yourhandle or npub..."
+            placeholder="@yourhandle"
           />
         </div>
 
@@ -81,6 +91,7 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 
 const arkAddress = ref('')
 const jsonExport = ref('')
+const nostrNpub = ref('')
 const contactHandle = ref('')
 const parsedInfo = ref<{
   arkAddress?: string
@@ -133,6 +144,7 @@ async function submitRequest() {
       body: JSON.stringify({
         arkAddress: arkAddress.value || parsedInfo.value?.arkAddress,
         nostrPubkey: parsedInfo.value?.publicKey,
+        nostrNpub: nostrNpub.value,
         boardingAddress: parsedInfo.value?.boardingAddress,
         punksInExport: parsedInfo.value?.punksInExport,
         contactHandle: contactHandle.value
@@ -157,6 +169,7 @@ async function submitRequest() {
 function resetForm() {
   arkAddress.value = ''
   jsonExport.value = ''
+  nostrNpub.value = ''
   contactHandle.value = ''
   parsedInfo.value = null
   submitted.value = false
@@ -289,6 +302,13 @@ h2 {
 
 .input-group textarea {
   resize: vertical;
+}
+
+.field-hint {
+  display: block;
+  color: #666;
+  font-size: 12px;
+  margin-top: 6px;
 }
 
 .parsed-info {
