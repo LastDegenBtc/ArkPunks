@@ -88,3 +88,49 @@ export async function getEscrowBalance() {
     throw new Error(`Failed to get escrow balance: ${error.message}`)
   }
 }
+
+/**
+ * Verify that a VTXO exists in the escrow wallet
+ * CRITICAL: Must verify before marking a listing as deposited
+ *
+ * @param vtxoOutpoint The VTXO outpoint to verify (format: "txid:vout")
+ * @param expectedAmount Expected amount in sats (default 10000)
+ * @returns { exists: boolean, vtxo?: object, error?: string }
+ */
+export async function verifyVtxoInEscrow(vtxoOutpoint, expectedAmount = 10000) {
+  console.log(`🔍 Verifying VTXO in escrow: ${vtxoOutpoint}`)
+
+  try {
+    const wallet = await initEscrowWallet()
+    const vtxos = await wallet.getVtxos()
+
+    // Parse outpoint
+    const [txid, voutStr] = vtxoOutpoint.split(':')
+    const vout = parseInt(voutStr, 10)
+
+    if (!txid || isNaN(vout)) {
+      return { exists: false, error: 'Invalid outpoint format' }
+    }
+
+    // Find matching VTXO
+    const found = vtxos.find(v => v.txid === txid && v.vout === vout)
+
+    if (!found) {
+      console.log(`❌ VTXO not found in escrow wallet: ${vtxoOutpoint}`)
+      return { exists: false, error: 'VTXO not found in escrow wallet' }
+    }
+
+    // Verify amount
+    if (found.value !== expectedAmount) {
+      console.log(`❌ VTXO amount mismatch: expected ${expectedAmount}, got ${found.value}`)
+      return { exists: false, error: `Amount mismatch: expected ${expectedAmount}, got ${found.value}` }
+    }
+
+    console.log(`✅ VTXO verified in escrow: ${vtxoOutpoint} (${found.value} sats)`)
+    return { exists: true, vtxo: found }
+
+  } catch (error) {
+    console.error('❌ Failed to verify VTXO:', error)
+    return { exists: false, error: error.message }
+  }
+}

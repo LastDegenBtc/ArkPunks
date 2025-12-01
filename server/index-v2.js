@@ -16,7 +16,7 @@ import Database from 'better-sqlite3'
 import { readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { returnPunkToSeller } from './escrow-wallet.js'
+import { returnPunkToSeller, verifyVtxoInEscrow } from './escrow-wallet.js'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
@@ -780,8 +780,10 @@ app.get('/api/escrow/listings', (req, res) => {
  * Update escrow listing with punk VTXO outpoint
  * POST /api/escrow/update-outpoint
  * Body: { punkId, punkVtxoOutpoint }
+ *
+ * CRITICAL: Verifies VTXO actually exists in escrow wallet before confirming deposit
  */
-app.post('/api/escrow/update-outpoint', (req, res) => {
+app.post('/api/escrow/update-outpoint', async (req, res) => {
   const { punkId, punkVtxoOutpoint } = req.body
 
   if (!punkId || !punkVtxoOutpoint) {
@@ -802,6 +804,29 @@ app.post('/api/escrow/update-outpoint', (req, res) => {
       })
     }
 
+    // CRITICAL: Verify VTXO actually exists in escrow wallet
+    const DEPOSIT_AMOUNT = 10000
+    const verification = await verifyVtxoInEscrow(punkVtxoOutpoint, DEPOSIT_AMOUNT)
+
+    if (!verification.exists) {
+      console.log(`❌ VTXO verification failed for ${punkId.slice(0, 8)}: ${verification.error}`)
+
+      // AUDIT: Failed deposit attempt
+      logAudit('DEPOSIT_CONFIRMED', {
+        punkId,
+        sellerAddress: listing.seller_address,
+        amount: listing.price_sats,
+        status: 'FAILED',
+        details: { vtxoOutpoint: punkVtxoOutpoint, error: verification.error }
+      })
+
+      return res.status(400).json({
+        error: 'Deposit verification failed',
+        details: verification.error,
+        message: 'VTXO not found in escrow wallet. Please ensure the deposit was sent correctly.'
+      })
+    }
+
     // Update listing: mark as deposited and store punk VTXO outpoint
     const now = Date.now()
     db.prepare(`
@@ -810,16 +835,20 @@ app.post('/api/escrow/update-outpoint', (req, res) => {
       WHERE punk_id = ?
     `).run(now, punkVtxoOutpoint, punkId)
 
-    // AUDIT: Deposit confirmed
+    // Extract TXID from outpoint for audit log
+    const [depositTxid] = punkVtxoOutpoint.split(':')
+
+    // AUDIT: Deposit confirmed (verified!) - now with TXID!
     logAudit('DEPOSIT_CONFIRMED', {
       punkId,
       sellerAddress: listing.seller_address,
-      amount: listing.price_sats,
+      amount: DEPOSIT_AMOUNT,
+      txid: depositTxid,
       status: 'SUCCESS',
-      details: { vtxoOutpoint: punkVtxoOutpoint }
+      details: { vtxoOutpoint: punkVtxoOutpoint, verified: true }
     })
 
-    console.log(`✅ Punk deposited to escrow: ${punkId.slice(0, 8)}...`)
+    console.log(`✅ Punk deposited to escrow (VERIFIED): ${punkId.slice(0, 8)}...`)
     console.log(`   VTXO outpoint: ${punkVtxoOutpoint}`)
 
     return res.json({
@@ -1349,17 +1378,53 @@ db.exec(`
   )
 `)
 
+// Helper: convert npub to hex pubkey
+function npubToHex(npub) {
+  if (!npub || !npub.startsWith('npub1')) return null
+  try {
+    // bech32 decode - simplified version
+    const ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+    const data = npub.slice(5) // remove 'npub1'
+    const values = []
+    for (const char of data) {
+      const idx = ALPHABET.indexOf(char)
+      if (idx === -1) return null
+      values.push(idx)
+    }
+    // Convert 5-bit to 8-bit
+    let bits = 0
+    let value = 0
+    const result = []
+    for (const v of values.slice(0, -6)) { // remove checksum
+      value = (value << 5) | v
+      bits += 5
+      while (bits >= 8) {
+        bits -= 8
+        result.push((value >> bits) & 0xff)
+      }
+    }
+    return result.map(b => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return null
+  }
+}
+
 // Public endpoint - submit recovery request (no password)
 app.post('/api/support/request', async (req, res) => {
-  const { arkAddress, nostrPubkey, boardingAddress, punksInExport, contactHandle } = req.body
+  const { arkAddress, nostrPubkey, nostrNpub, boardingAddress, punksInExport, contactHandle } = req.body
 
-  if (!arkAddress && !nostrPubkey && !boardingAddress) {
+  if (!arkAddress && !nostrPubkey && !nostrNpub && !boardingAddress) {
     return res.status(400).json({ success: false, error: 'Please provide at least one identifier' })
   }
 
   try {
-    // Search for punks (same logic as before, but store results)
+    // Convert npub to hex if provided
+    const npubHex = npubToHex(nostrNpub)
+    const pubkeyToSearch = npubHex || nostrPubkey
+
+    // Search for punks in all sources
     let punksFound = 0
+    let legacyFound = 0
 
     if (arkAddress) {
       const punksOwned = db.prepare(`SELECT COUNT(*) as count FROM punks WHERE owner_address = ?`).get(arkAddress)
@@ -1370,13 +1435,20 @@ app.post('/api/support/request', async (req, res) => {
       punksFound = punksOwned.count + salesAsSeller.count + salesAsBuyer.count + listings.count
     }
 
+    // Search in legacy_data by minter_pubkey
+    if (pubkeyToSearch) {
+      const legacy = db.prepare(`SELECT COUNT(*) as count FROM legacy_data WHERE minter_pubkey = ?`).get(pubkeyToSearch)
+      legacyFound = legacy.count
+      punksFound += legacyFound
+    }
+
     // Store the request
     const result = db.prepare(`
       INSERT INTO support_requests (ark_address, nostr_pubkey, boarding_address, punks_in_export, contact_handle, punks_found)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(arkAddress, nostrPubkey, boardingAddress, punksInExport, contactHandle, punksFound)
+    `).run(arkAddress, pubkeyToSearch || nostrNpub, boardingAddress, punksInExport, contactHandle, punksFound)
 
-    console.log(`📩 New support request #${result.lastInsertRowid} from ${arkAddress?.slice(0, 30) || 'unknown'}... (found ${punksFound} records)`)
+    console.log(`📩 New support request #${result.lastInsertRowid} from ${arkAddress?.slice(0, 30) || nostrNpub?.slice(0, 20) || 'unknown'}... (found ${punksFound} records, ${legacyFound} legacy)`)
 
     return res.json({
       success: true,
@@ -1425,14 +1497,14 @@ app.get('/api/admin/support-requests', (req, res) => {
 
 // Admin endpoint - lookup punk details for a request
 app.get('/api/admin/support-lookup', (req, res) => {
-  const { password, arkAddress } = req.query
+  const { password, arkAddress, nostrPubkey } = req.query
 
   if (password !== ADMIN_PASSWORD) {
     return res.status(401).json({ success: false, error: 'Unauthorized' })
   }
 
-  if (!arkAddress) {
-    return res.status(400).json({ success: false, error: 'arkAddress required' })
+  if (!arkAddress && !nostrPubkey) {
+    return res.status(400).json({ success: false, error: 'arkAddress or nostrPubkey required' })
   }
 
   try {
@@ -1442,44 +1514,70 @@ app.get('/api/admin/support-lookup', (req, res) => {
       punks: []
     }
 
-    // 1. Search in punks table
-    const punksOwned = db.prepare(`
-      SELECT punk_id, owner_address, punk_metadata_compressed, created_at, server_signature
-      FROM punks WHERE owner_address = ?
-    `).all(arkAddress)
+    if (arkAddress) {
+      // 1. Search in punks table
+      const punksOwned = db.prepare(`
+        SELECT punk_id, owner_address, punk_metadata_compressed, created_at, server_signature
+        FROM punks WHERE owner_address = ?
+      `).all(arkAddress)
 
-    if (punksOwned.length > 0) {
-      results.sources.push({ source: 'database_owner', description: 'Punks currently owned', count: punksOwned.length })
-      punksOwned.forEach(p => {
-        results.punks.push({ punkId: p.punk_id, source: 'database_owner', isOfficial: !!p.server_signature })
-      })
+      if (punksOwned.length > 0) {
+        results.sources.push({ source: 'database_owner', description: 'Punks currently owned', count: punksOwned.length })
+        punksOwned.forEach(p => {
+          results.punks.push({ punkId: p.punk_id, source: 'database_owner', isOfficial: !!p.server_signature })
+        })
+      }
+
+      // 2. Search in sales as seller
+      const salesAsSeller = db.prepare(`SELECT punk_id, price_sats, buyer_address, sold_at FROM sales WHERE seller_address = ?`).all(arkAddress)
+      if (salesAsSeller.length > 0) {
+        results.sources.push({ source: 'sales_seller', description: 'Punks sold', count: salesAsSeller.length })
+        salesAsSeller.forEach(s => {
+          results.punks.push({ punkId: s.punk_id, source: 'sales_seller', price: s.price_sats, soldAt: s.sold_at })
+        })
+      }
+
+      // 3. Search in sales as buyer
+      const salesAsBuyer = db.prepare(`SELECT punk_id, price_sats, seller_address, sold_at FROM sales WHERE buyer_address = ?`).all(arkAddress)
+      if (salesAsBuyer.length > 0) {
+        results.sources.push({ source: 'sales_buyer', description: 'Punks bought', count: salesAsBuyer.length })
+        salesAsBuyer.forEach(s => {
+          results.punks.push({ punkId: s.punk_id, source: 'sales_buyer', price: s.price_sats, boughtAt: s.sold_at })
+        })
+      }
+
+      // 4. Search in listings
+      const listings = db.prepare(`SELECT punk_id, price_sats, status, created_at FROM listings WHERE seller_address = ?`).all(arkAddress)
+      if (listings.length > 0) {
+        results.sources.push({ source: 'listings', description: 'Listings created', count: listings.length })
+        listings.forEach(l => {
+          results.punks.push({ punkId: l.punk_id, source: 'listings', status: l.status, price: l.price_sats })
+        })
+      }
     }
 
-    // 2. Search in sales as seller
-    const salesAsSeller = db.prepare(`SELECT punk_id, price_sats, buyer_address, sold_at FROM sales WHERE seller_address = ?`).all(arkAddress)
-    if (salesAsSeller.length > 0) {
-      results.sources.push({ source: 'sales_seller', description: 'Punks sold', count: salesAsSeller.length })
-      salesAsSeller.forEach(s => {
-        results.punks.push({ punkId: s.punk_id, source: 'sales_seller', price: s.price_sats, soldAt: s.sold_at })
-      })
-    }
+    // 5. Search in legacy_data by minter_pubkey
+    if (nostrPubkey) {
+      // Try to convert if it's an npub
+      const pubkeyHex = nostrPubkey.startsWith('npub1') ? npubToHex(nostrPubkey) : nostrPubkey
+      if (pubkeyHex) {
+        const legacyPunks = db.prepare(`
+          SELECT punk_id, minter_pubkey, minted_at, vtxo_outpoint
+          FROM legacy_data WHERE minter_pubkey = ?
+        `).all(pubkeyHex)
 
-    // 3. Search in sales as buyer
-    const salesAsBuyer = db.prepare(`SELECT punk_id, price_sats, seller_address, sold_at FROM sales WHERE buyer_address = ?`).all(arkAddress)
-    if (salesAsBuyer.length > 0) {
-      results.sources.push({ source: 'sales_buyer', description: 'Punks bought', count: salesAsBuyer.length })
-      salesAsBuyer.forEach(s => {
-        results.punks.push({ punkId: s.punk_id, source: 'sales_buyer', price: s.price_sats, boughtAt: s.sold_at })
-      })
-    }
-
-    // 4. Search in listings
-    const listings = db.prepare(`SELECT punk_id, price_sats, status, created_at FROM listings WHERE seller_address = ?`).all(arkAddress)
-    if (listings.length > 0) {
-      results.sources.push({ source: 'listings', description: 'Listings created', count: listings.length })
-      listings.forEach(l => {
-        results.punks.push({ punkId: l.punk_id, source: 'listings', status: l.status, price: l.price_sats })
-      })
+        if (legacyPunks.length > 0) {
+          results.sources.push({ source: 'legacy_registry', description: 'Legacy mints (registry)', count: legacyPunks.length })
+          legacyPunks.forEach(l => {
+            results.punks.push({
+              punkId: l.punk_id,
+              source: 'legacy_registry',
+              mintedAt: l.minted_at,
+              vtxo: l.vtxo_outpoint?.slice(0, 20)
+            })
+          })
+        }
+      }
     }
 
     const uniquePunkIds = [...new Set(results.punks.map(p => p.punkId))]
