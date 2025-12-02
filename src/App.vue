@@ -956,10 +956,16 @@ async function listPunk(punk: PunkState) {
       )
 
       if (!transferConfirm) {
-        alert(
-          `⚠️ Listing created but deposit not sent to escrow.\n\n` +
-          `The listing won't be active until you send the deposit to escrow.`
-        )
+        // User cancelled - delete the listing we just created
+        console.log('❌ User cancelled deposit, removing listing...')
+        try {
+          const { cancelEscrowListing } = await import('./utils/escrowApi')
+          await cancelEscrowListing(punk.punkId, arkAddress)
+          console.log('✅ Listing removed')
+        } catch (cancelErr) {
+          console.error('Failed to cancel listing:', cancelErr)
+        }
+        alert(`Listing cancelled. No deposit was sent.`)
         return
       }
 
@@ -991,10 +997,18 @@ async function listPunk(punk: PunkState) {
         )
       } catch (sendError: any) {
         console.error('❌ Failed to send deposit to escrow:', sendError)
+        // Cancel the listing since deposit failed
+        try {
+          const { cancelEscrowListing } = await import('./utils/escrowApi')
+          await cancelEscrowListing(punk.punkId, arkAddress)
+          console.log('✅ Listing cancelled after failed deposit')
+        } catch (cancelErr) {
+          console.error('Failed to cancel listing:', cancelErr)
+        }
         alert(
-          `⚠️ Listing created but failed to send deposit to escrow:\n\n` +
+          `❌ Failed to send deposit to escrow:\n\n` +
           `${sendError?.message || sendError}\n\n` +
-          `Please try listing again.`
+          `Listing has been cancelled. Please try again.`
         )
         return
       }
