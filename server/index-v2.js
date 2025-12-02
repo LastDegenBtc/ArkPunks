@@ -1132,9 +1132,38 @@ app.post('/api/escrow/cancel', async (req, res) => {
       return res.status(400).json({ error: 'Listing already sold' })
     }
 
-    // If punk was deposited, return it to seller
+    // Check if we need to refund - either by status OR by checking escrow wallet
+    // This handles race condition where user cancels before deposit is confirmed in DB
+    let needsRefund = listing.status === 'deposited'
+    let vtxoOutpoint = listing.punk_vtxo_outpoint
+
+    // If status is not 'deposited', check if there's actually a VTXO in escrow
+    // This catches the race condition where deposit arrived but wasn't confirmed yet
+    if (!needsRefund && listing.status === 'pending') {
+      console.log(`🔍 Checking escrow for unreported deposit...`)
+      const { getEscrowVtxos } = await import('./escrow-wallet.js')
+      try {
+        const vtxos = await getEscrowVtxos()
+        // Look for any 10k VTXO that could be this punk's deposit
+        // Since we don't have the outpoint yet, check if there are any 10k VTXOs
+        const depositVtxos = vtxos.filter(v => v.value === 10000)
+        if (depositVtxos.length > 0) {
+          console.log(`⚠️  Found ${depositVtxos.length} potential deposit VTXO(s) in escrow`)
+          // We'll refund one of them - not perfect but better than losing user funds
+          needsRefund = true
+          // Use the first available 10k VTXO
+          vtxoOutpoint = `${depositVtxos[0].txid}:${depositVtxos[0].vout}`
+          console.log(`   Using VTXO: ${vtxoOutpoint}`)
+        }
+      } catch (err) {
+        console.error(`   Error checking escrow:`, err.message)
+        // Continue without refund check - fail safe
+      }
+    }
+
+    // If punk was deposited (confirmed or found in escrow), return it to seller
     let returnTxid = null
-    if (listing.status === 'deposited') {
+    if (needsRefund) {
       console.log(`📦 Punk was deposited, returning to seller...`)
       try {
         const result = await returnPunkToSeller(sellerAddress, 10000)
@@ -1170,13 +1199,19 @@ app.post('/api/escrow/cancel', async (req, res) => {
     `).run(now, punkId)
 
     // AUDIT: Listing cancelled
+    const wasDbDeposited = listing.status === 'deposited'
+    const foundUnconfirmedDeposit = needsRefund && !wasDbDeposited
     logAudit('LISTING_CANCELLED', {
       punkId,
       sellerAddress,
       amount: listing.price_sats,
       txid: returnTxid,
       status: 'SUCCESS',
-      details: { wasDeposited: listing.status === 'deposited', refundAmount: returnTxid ? 10000 : 0 }
+      details: {
+        wasDeposited: wasDbDeposited,
+        foundUnconfirmedDeposit,
+        refundAmount: returnTxid ? 10000 : 0
+      }
     })
 
     console.log(`🔴 Listing cancelled: ${punkId.slice(0, 8)}...`)

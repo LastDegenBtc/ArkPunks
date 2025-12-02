@@ -134,3 +134,12 @@ export async function verifyVtxoInEscrow(vtxoOutpoint, expectedAmount = 10000) {
     return { exists: false, error: error.message }
   }
 }
+
+/**
+ * Get all VTXOs in escrow wallet
+ * Used to check for unreported deposits during cancel
+ */
+export async function getEscrowVtxos() {
+  const wallet = await initEscrowWallet()
+  return await wallet.getVtxos()
+}
