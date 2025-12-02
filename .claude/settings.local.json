@@ -24,7 +24,9 @@
       "Bash(dig:*)",
       "Bash(cat:*)",
       "Bash(jq \".punks[] | select(.owner_address | contains(\"\"gqfp6nz3ku25rfjql3dfsytz6fsswuvg6j7vgt07jlck5qeuwglz0y30m\"\")) | .punk_id\")",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(sqlite3:*)",
+      "Bash(pm2 restart:*)"
     ],
     "deny": [],
     "ask": []

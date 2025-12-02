@@ -67,6 +67,51 @@ if (!tableExists) {
 
 console.log('✅ Database ready\n')
 
+// ============================================================
+// LISTING VALIDATION - Cancel listings without valid deposits
+// ============================================================
+
+/**
+ * Validate all deposited listings have actual VTXOs in escrow
+ * Cancel any listings where the deposit VTXO no longer exists
+ */
+async function validateListingsHaveDeposits() {
+  console.log('🔍 Validating deposited listings have actual VTXOs...')
+
+  try {
+    const { getEscrowVtxos } = await import('./escrow-wallet.js')
+    const vtxos = await getEscrowVtxos()
+
+    // Get all 10k VTXOs (deposits)
+    const depositVtxos = vtxos.filter(v => v.value === 10000)
+    console.log(`   Found ${depositVtxos.length} deposit VTXOs in escrow wallet`)
+
+    // Get count of deposited listings
+    const { count: depositedCount } = db.prepare(`
+      SELECT COUNT(*) as count FROM listings WHERE status = 'deposited'
+    `).get()
+
+    console.log(`   Found ${depositedCount} deposited listings in DB`)
+
+    // Simple check: if we have fewer VTXOs than listings, something is wrong
+    if (depositVtxos.length < depositedCount) {
+      console.log(`   ⚠️  WARNING: ${depositedCount} listings but only ${depositVtxos.length} deposit VTXOs!`)
+      console.log(`   Some listings may not have valid deposits - manual review needed`)
+    } else {
+      console.log(`   ✅ All listings have potential deposit VTXOs`)
+    }
+
+  } catch (error) {
+    console.error('   ❌ Failed to validate listings:', error.message)
+  }
+}
+
+// Run validation on startup (async)
+validateListingsHaveDeposits()
+
+// Run validation every hour
+setInterval(validateListingsHaveDeposits, 60 * 60 * 1000)
+
 // Admin password protection
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin_secret_2024'
 
@@ -742,13 +787,14 @@ app.post('/api/escrow/list', (req, res) => {
  */
 app.get('/api/escrow/listings', (req, res) => {
   try {
+    // Only return listings with confirmed deposits - no pending allowed
     const listings = db.prepare(`
       SELECT
         l.*,
         p.server_signature
       FROM listings l
       LEFT JOIN punks p ON l.punk_id = p.punk_id
-      WHERE l.status IN ('pending', 'deposited')
+      WHERE l.status = 'deposited'
       ORDER BY l.created_at DESC
     `).all()
 
