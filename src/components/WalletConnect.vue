@@ -478,7 +478,7 @@
                 />
               </label>
               <p class="input-hint">
-                Minimum: 1,000 sats. You have {{ formatSats(balance.available) }} sats available.
+                Minimum: 400 sats. You have {{ formatSats(balance.available) }} sats available.
               </p>
             </div>
 
@@ -492,7 +492,7 @@
           <div class="modal-footer">
             <button
               @click="sendSats"
-              :disabled="!sendRecipientAddress || !sendAmount || sendAmount < 1000 || sending"
+              :disabled="!sendRecipientAddress || !sendAmount || sendAmount < 400 || sending"
               class="btn btn-primary"
             >
               {{ sending ? 'Sending...' : 'Send' }}
@@ -1152,8 +1152,8 @@ async function sendSats() {
     return
   }
 
-  if (sendAmount.value < 1000) {
-    sendStatus.value = 'Minimum amount is 1,000 sats'
+  if (sendAmount.value < 400) {
+    sendStatus.value = 'Minimum amount is 400 sats'
     sendSuccess.value = false
     return
   }
