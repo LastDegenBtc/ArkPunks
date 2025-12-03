@@ -1010,15 +1010,64 @@ app.post('/api/escrow/execute', async (req, res) => {
       })
     }
 
-    const now = Date.now()
+    // Calculate expected payment amount (price + 1% fee)
+    const price = listing.price_sats
+    const feePercent = 1
+    const fee = Math.ceil(price * feePercent / 100)
+    const expectedPayment = price + fee
 
     console.log(`💰 Executing purchase for punk ${punkId.slice(0, 8)}...`)
-    console.log(`   Price: ${listing.price_sats} sats`)
+    console.log(`   Price: ${price} sats`)
+    console.log(`   Fee (${feePercent}%): ${fee} sats`)
+    console.log(`   Expected payment: ${expectedPayment} sats`)
     console.log(`   Seller: ${listing.seller_address.slice(0, 20)}...`)
     console.log(`   Buyer: ${buyerArkAddress.slice(0, 20)}...`)
 
-    // Note: In v2 architecture, wallets are registered via punk ownership
-    // No need for separate registered_wallets table
+    // CRITICAL: Verify buyer payment exists in escrow wallet BEFORE proceeding
+    console.log(`🔍 Step 0: Verifying buyer payment in escrow wallet...`)
+    const { getEscrowVtxos } = await import('./escrow-wallet.js')
+
+    try {
+      const vtxos = await getEscrowVtxos()
+
+      // Look for a VTXO matching the expected payment amount (with small tolerance for rounding)
+      const paymentVtxo = vtxos.find(v =>
+        v.value >= expectedPayment && v.value <= expectedPayment + 10
+      )
+
+      if (!paymentVtxo) {
+        console.log(`❌ Buyer payment not found in escrow wallet!`)
+        console.log(`   Expected: ${expectedPayment} sats`)
+        console.log(`   Available VTXOs: ${vtxos.map(v => v.value).join(', ')}`)
+
+        // AUDIT: Payment verification failed
+        logAudit('PAYMENT_VERIFICATION_FAILED', {
+          punkId,
+          sellerAddress: listing.seller_address,
+          buyerAddress: buyerArkAddress,
+          amount: expectedPayment,
+          status: 'FAILED',
+          error: 'Buyer payment VTXO not found in escrow wallet'
+        })
+
+        return res.status(400).json({
+          error: 'Payment not received',
+          details: `Expected ${expectedPayment} sats but no matching VTXO found in escrow wallet`,
+          message: 'Please send payment to escrow address first, then retry execution'
+        })
+      }
+
+      console.log(`✅ Buyer payment verified: ${paymentVtxo.value} sats (txid: ${paymentVtxo.txid})`)
+
+    } catch (error) {
+      console.error(`❌ Failed to verify buyer payment:`, error.message)
+      return res.status(500).json({
+        error: 'Payment verification failed',
+        details: error.message
+      })
+    }
+
+    const now = Date.now()
 
     // STEP 1: Update database FIRST (atomic "lock" prevents double execution)
     console.log(`📝 Step 1: Updating database (marking as sold)...`)
@@ -1048,11 +1097,16 @@ app.post('/api/escrow/execute', async (req, res) => {
     // This prevents double payment because if payment fails and buyer retries,
     // the punk is already sold to them
     console.log(`💸 Step 2: Sending payment to seller...`)
+
+    // Seller receives price (marketplace keeps the fee)
+    const sellerPayment = price
+    console.log(`   Seller receives: ${sellerPayment} sats (fee of ${fee} sats kept by marketplace)`)
+
     let paymentTxid
     let depositReturnTxid
     try {
-      // Send sale price to seller
-      const payment = await returnPunkToSeller(listing.seller_address, listing.price_sats)
+      // Send sale price to seller (full price - we already collected fee from buyer)
+      const payment = await returnPunkToSeller(listing.seller_address, sellerPayment)
       paymentTxid = payment.txid
       console.log(`✅ Payment sent to seller: ${paymentTxid}`)
 
