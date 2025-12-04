@@ -981,8 +981,9 @@ app.post('/api/escrow/buy', (req, res) => {
 app.post('/api/escrow/execute', async (req, res) => {
   const { punkId, buyerPubkey, buyerArkAddress } = req.body
 
-  if (!punkId || !buyerPubkey || !buyerArkAddress) {
-    return res.status(400).json({ error: 'punkId, buyerPubkey, and buyerArkAddress required' })
+  // buyerPubkey is optional - only punkId and buyerArkAddress are required
+  if (!punkId || !buyerArkAddress) {
+    return res.status(400).json({ error: 'punkId and buyerArkAddress required' })
   }
 
   try {
@@ -1031,8 +1032,9 @@ app.post('/api/escrow/execute', async (req, res) => {
       const vtxos = await getEscrowVtxos()
 
       // Look for a VTXO matching the expected payment amount (with small tolerance for rounding)
+      // Allow -2 to +10 sats tolerance for client-side rounding differences
       const paymentVtxo = vtxos.find(v =>
-        v.value >= expectedPayment && v.value <= expectedPayment + 10
+        v.value >= expectedPayment - 2 && v.value <= expectedPayment + 10
       )
 
       if (!paymentVtxo) {
